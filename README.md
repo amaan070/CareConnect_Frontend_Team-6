@@ -10,6 +10,10 @@ CS6.302 Software System Development — Assignment 1b (Frontend + API on top of 
 | **Demo video (≤ 5 min)** | `[FILL: link]` |
 | **A1 repository we built on** | `[FILL: A1 repo URL / team]` |
 
+## Demo Video
+
+https://drive.google.com/file/d/1-aRV-R6TcWybbtl23oxVzNaSsfdIJ5yi/view?usp=sharing
+
 ## Team and contributions
 
 | Member | Roll no. | Contribution |
