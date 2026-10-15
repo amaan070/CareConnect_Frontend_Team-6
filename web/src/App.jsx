@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MapContainer, TileLayer, CircleMarker, Popup, Circle } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import "./App.css";
@@ -6,7 +6,13 @@ import { LoadingState, ErrorState, EmptyState } from "./components/StateViews.js
 import ActorSwitcher from "./components/ActorSwitcher.jsx";
 
 const ACTOR_STORAGE_KEY = "careconnect.demoActor";
-const DEFAULT_ACTOR = { role: "admin", patientId: "", patientName: "" };
+const DEFAULT_ACTOR = {
+    role: "admin",
+    patientId: "",
+    patientName: "",
+    clinicId: "",
+    clinicName: ""
+};
 
 const loadStoredActor = () => {
     try {
@@ -17,7 +23,9 @@ const loadStoredActor = () => {
             ? {
                 role: parsed.role,
                 patientId: parsed.patientId || "",
-                patientName: parsed.patientName || ""
+                patientName: parsed.patientName || "",
+                clinicId: parsed.clinicId || "",
+                clinicName: parsed.clinicName || ""
             }
             : DEFAULT_ACTOR;
     } catch {
@@ -71,6 +79,87 @@ const formatMoney = (value) =>
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
     })}`;
+
+// Clinic staff only see rows that belong to their own clinic
+const forClinic = (rows, actor) =>
+    actor.role === "staff"
+        ? rows.filter((r) => String(r.clinic_id) === String(actor.clinicId))
+        : rows;
+
+// A row belongs to the staff member's clinic by id when the API sends one,
+// otherwise by clinic name.
+const belongsToClinic = (row, actor) =>
+    row.clinic_id != null && row.clinic_id !== ""
+        ? String(row.clinic_id) === String(actor.clinicId)
+        : String(row.clinic_name ?? "") === String(actor.clinicName ?? "");
+
+// The appointments list is paginated across ALL clinics, so we ask the
+// server to search for this clinic's name (the search box already matches
+// clinic names) and then keep only rows that truly belong to the clinic.
+// This keeps the request small instead of crawling every appointment.
+const MAX_STAFF_PAGES = 60;
+
+const fetchClinicAppointments = async (actor) => {
+    const fetchPage = async (page) => {
+        const response = await fetch(
+            `http://localhost:5000/api/appointments?page=${page}&limit=100` +
+            `&clinic_id=${encodeURIComponent(actor.clinicId)}` +
+            `&search=${encodeURIComponent(actor.clinicName ?? "")}`
+        );
+        if (!response.ok) throw new Error("Failed to fetch appointments");
+        return response.json();
+    };
+
+    const first = await fetchPage(1);
+    const totalPages = Math.min(
+        Number(first.totalPages) || 1,
+        MAX_STAFF_PAGES
+    );
+    const pages = [first];
+
+    for (let start = 2; start <= totalPages; start += 8) {
+        const count = Math.min(8, totalPages - start + 1);
+        const batch = await Promise.all(
+            Array.from({ length: count }, (_, i) => fetchPage(start + i))
+        );
+        pages.push(...batch);
+    }
+
+    const byId = new Map();
+    pages
+        .flatMap((d) => d.appointments || [])
+        .forEach((a) => byId.set(String(a.id), a));
+
+    return [...byId.values()].filter((a) => belongsToClinic(a, actor));
+};
+
+// Loads every patient (all pages)
+const fetchAllPatients = async () => {
+    const byId = new Map();
+    let page = 1;
+    let totalPages = 1;
+
+    while (page <= totalPages && page <= 200) {
+        const response = await fetch(
+            `http://localhost:5000/api/patients?page=${page}&limit=1000`
+        );
+        if (!response.ok) throw new Error("Failed to fetch patients");
+
+        const data = await response.json();
+        const rows = data.patients || [];
+        totalPages = Number(data.totalPages) || 1;
+
+        const before = byId.size;
+        rows.forEach((p) => byId.set(String(p.id), p));
+
+        if (rows.length === 0 || byId.size === before) break;
+        page += 1;
+    }
+
+    return [...byId.values()].sort((a, b) =>
+        String(a.name).localeCompare(String(b.name))
+    );
+};
 
 // "2026-10-14T00:00:00.000Z" and "2026-10-14" both become "2026-10-14"
 const toDateKey = (value) => String(value).slice(0, 10);
@@ -542,7 +631,7 @@ const refreshDischargeAnalytics = async () => {
 
         const data = await dataResponse.json();
 
-        setDischargeData(data.summary || []);
+        setDischargeData(forClinic(data.summary || [], actor));
 
         // Prefer the time the refresh endpoint reports, then the data endpoint's
         const refreshResult = await response.json().catch(() => ({}));
@@ -572,7 +661,9 @@ const refreshDischargeAnalytics = async () => {
     const [actor, setActor] = useState(loadStoredActor);
     const isPatientActor = actor.role === "patient";
     const needsPatientPick = isPatientActor && !actor.patientId;
-    const canAdvanceStatus = !isPatientActor;
+    const isStaffActor = actor.role === "staff";
+    const needsClinicPick = isStaffActor && !actor.clinicId;
+    const canAdvanceStatus = !isPatientActor && !needsClinicPick;
 
     // Bump to re-run a failed fetch from a "Try again" button
     const [reloadTick, setReloadTick] = useState(0);
@@ -591,6 +682,9 @@ const refreshDischargeAnalytics = async () => {
         setAppointmentPage(1);
         setSelectedAppointment(null);
         setAuditLogs([]);
+        setSelectedClinic(null);
+        setClinicPage(1);
+        setPage(1);
         setAuditPatientId(next.role === "patient" ? next.patientId : "");
         if (
             next.role === "patient" &&
@@ -699,6 +793,12 @@ const refreshDischargeAnalytics = async () => {
     const [dischargeError, setDischargeError] = useState("");
     const [dischargeRefreshedAt, setDischargeRefreshedAt] = useState(null);
     const [chartClinicId, setChartClinicId] = useState("");
+
+    // Clinic staff: everything about their own clinic, loaded once
+    const [clinicAppointments, setClinicAppointments] = useState([]);
+    const [staffAllPatients, setStaffAllPatients] = useState([]);
+    const [staffLoading, setStaffLoading] = useState(false);
+    const [staffError, setStaffError] = useState("");
     // =========================
     // FETCH PATIENTS
     // =========================
@@ -792,7 +892,7 @@ useEffect(() => {
             const revenueData = await revenueResponse.json();
 
             if (!cancelled) {
-                setAnalyticsData(revenueData.analytics || []);
+                setAnalyticsData(forClinic(revenueData.analytics || [], actor));
             }
         } catch (error) {
             console.error(error);
@@ -820,7 +920,7 @@ useEffect(() => {
             const dischargeResult = await dischargeResponse.json();
 
             if (!cancelled) {
-                setDischargeData(dischargeResult.summary || []);
+                setDischargeData(forClinic(dischargeResult.summary || [], actor));
                 setDischargeRefreshedAt(readRefreshedAt(dischargeResult));
             }
         } catch (error) {
@@ -840,7 +940,7 @@ useEffect(() => {
         cancelled = true;
     };
 
-}, [view, reloadTick]);
+}, [view, reloadTick, actor.role, actor.clinicId]);
 
 
 useEffect(() => {
@@ -906,6 +1006,12 @@ useEffect(() => {
     useEffect(() => {
         if (view !== "patients") return;
 
+        // Clinic staff get their clinic's patients from the staff loader
+        if (isStaffActor) {
+            setLoading(false);
+            return;
+        }
+
         let cancelled = false;
         const fetchPatients = async () => {
             try {
@@ -942,7 +1048,7 @@ useEffect(() => {
             cancelled = true;
         };
 
-    }, [view, page, search, reloadTick]);
+    }, [view, page, search, reloadTick, isStaffActor]);
 
     // =========================
     // FETCH PATIENT DETAILS
@@ -985,6 +1091,14 @@ useEffect(() => {
     useEffect(() => {
         if (view !== "clinics") return;
 
+        // Clinic staff only ever see their own clinic
+        if (needsClinicPick) {
+            setClinics([]);
+            setClinicTotalPages(1);
+            setListError("");
+            return;
+        }
+
         let cancelled = false;
 
         const fetchClinics = async () => {
@@ -994,9 +1108,13 @@ useEffect(() => {
                 setListError("");
 
                 const response = await fetch(
-                    `http://localhost:5000/api/clinics?page=${clinicPage}&limit=20&search=${encodeURIComponent(
-                        clinicSearch
-                    )}`
+                    isStaffActor
+                        ? `http://localhost:5000/api/clinics/${encodeURIComponent(
+                            actor.clinicId
+                        )}`
+                        : `http://localhost:5000/api/clinics?page=${clinicPage}&limit=20&search=${encodeURIComponent(
+                            clinicSearch
+                        )}`
                 );
 
                 if (!response.ok) {
@@ -1007,8 +1125,13 @@ useEffect(() => {
 
                 if (cancelled) return;
 
-                setClinics(data.clinics);
-                setClinicTotalPages(data.totalPages);
+                if (isStaffActor) {
+                    setClinics([data.clinic ?? data]);
+                    setClinicTotalPages(1);
+                } else {
+                    setClinics(data.clinics);
+                    setClinicTotalPages(data.totalPages);
+                }
             } catch (err) {
                 console.error(err);
                 if (!cancelled) setListError("Could not load clinics. Check that the API is running.");
@@ -1023,7 +1146,15 @@ useEffect(() => {
             cancelled = true;
         };
 
-    }, [view, clinicPage, clinicSearch, reloadTick]);
+    }, [
+        view,
+        clinicPage,
+        clinicSearch,
+        reloadTick,
+        isStaffActor,
+        needsClinicPick,
+        actor.clinicId
+    ]);
 
     // =========================
     // FETCH CLINIC DETAILS
@@ -1067,9 +1198,15 @@ useEffect(() => {
         if (view !== "appointments") return;
 
         // A patient actor with nobody selected must never see everyone's data
-        if (needsPatientPick) {
+        if (needsPatientPick || needsClinicPick) {
             setAppointments([]);
             setListError("");
+            return;
+        }
+
+        // Clinic staff get their clinic's appointments from the staff loader
+        if (isStaffActor) {
+            setLoading(false);
             return;
         }
 
@@ -1087,6 +1224,9 @@ useEffect(() => {
                     `&limit=20` +
                     (isPatientActor
                         ? `&patient_id=${encodeURIComponent(actor.patientId)}`
+                        : "") +
+                    (isStaffActor
+                        ? `&clinic_id=${encodeURIComponent(actor.clinicId)}`
                         : "") +
                     `&status=${encodeURIComponent(
                         appointmentStatus
@@ -1107,7 +1247,16 @@ useEffect(() => {
 
                 if (cancelled) return;
 
-                setAppointments(data.appointments);
+                // Safety net: staff only ever see their own clinic's rows
+                setAppointments(
+                    isStaffActor
+                        ? (data.appointments || []).filter(
+                            (a) =>
+                                a.clinic_id == null ||
+                                String(a.clinic_id) === String(actor.clinicId)
+                        )
+                        : data.appointments
+                );
                 setAppointmentTotalPages(data.totalPages);
             } catch (err) {
                 console.error(err);
@@ -1131,7 +1280,10 @@ useEffect(() => {
         reloadTick,
         isPatientActor,
         actor.patientId,
-        needsPatientPick
+        needsPatientPick,
+        isStaffActor,
+        needsClinicPick,
+        actor.clinicId
     ]);
 
     // =========================
@@ -1273,6 +1425,125 @@ useEffect(() => {
     }, [view, reloadTick]);
 
 
+    // =========================
+    // CLINIC STAFF DATA (their clinic only)
+    // =========================
+
+    useEffect(() => {
+        if (!isStaffActor || !actor.clinicId) {
+            setClinicAppointments((prev) => (prev.length ? [] : prev));
+            setStaffAllPatients((prev) => (prev.length ? [] : prev));
+            return;
+        }
+
+        let cancelled = false;
+
+        const loadStaffData = async () => {
+            try {
+                setStaffLoading(true);
+                setStaffError("");
+
+                // Each list shows up as soon as it arrives
+                await Promise.all([
+                    fetchClinicAppointments(actor).then((rows) => {
+                        if (!cancelled) setClinicAppointments(rows);
+                    }),
+                    fetchAllPatients().then((rows) => {
+                        if (!cancelled) setStaffAllPatients(rows);
+                    })
+                ]);
+            } catch (err) {
+                console.error(err);
+                if (!cancelled) {
+                    setStaffError(
+                        "Could not load this clinic's data. Check that the API is running."
+                    );
+                }
+            } finally {
+                if (!cancelled) setStaffLoading(false);
+            }
+        };
+
+        loadStaffData();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [isStaffActor, actor.clinicId, actor.clinicName, reloadTick]);
+
+    // Patients of the staff member's clinic = patients with an appointment there
+    const clinicPatients = useMemo(() => {
+        if (!isStaffActor) return [];
+
+        const ids = new Set(
+            clinicAppointments
+                .map((a) => a.patient_id)
+                .filter((v) => v != null && v !== "")
+                .map(String)
+        );
+        const names = new Set(
+            clinicAppointments.map((a) =>
+                String(a.patient_name ?? "").toLowerCase()
+            )
+        );
+        const rowsHaveIds =
+            clinicAppointments.length > 0 &&
+            clinicAppointments.every(
+                (a) => a.patient_id != null && a.patient_id !== ""
+            );
+
+        return staffAllPatients.filter((p) =>
+            rowsHaveIds
+                ? ids.has(String(p.id))
+                : names.has(String(p.name).toLowerCase())
+        );
+    }, [isStaffActor, clinicAppointments, staffAllPatients]);
+
+    // Staff: appointments tab = this clinic's rows, filtered + paged here
+    useEffect(() => {
+        if (!isStaffActor || view !== "appointments") return;
+
+        const q = appointmentSearch.trim().toLowerCase();
+        const rows = clinicAppointments.filter(
+            (a) =>
+                (!appointmentStatus || a.status === appointmentStatus) &&
+                (!q ||
+                    String(a.patient_name ?? "").toLowerCase().includes(q) ||
+                    String(a.clinic_name ?? "").toLowerCase().includes(q))
+        );
+
+        const pages = Math.max(1, Math.ceil(rows.length / 20));
+        const safePage = Math.min(appointmentPage, pages);
+
+        if (safePage !== appointmentPage) setAppointmentPage(safePage);
+        setAppointments(rows.slice((safePage - 1) * 20, safePage * 20));
+        setAppointmentTotalPages(pages);
+    }, [
+        isStaffActor,
+        view,
+        clinicAppointments,
+        appointmentStatus,
+        appointmentSearch,
+        appointmentPage
+    ]);
+
+    // Staff: patients tab = only this clinic's patients, searched + paged here
+    useEffect(() => {
+        if (!isStaffActor || view !== "patients") return;
+
+        const q = search.trim().toLowerCase();
+        const rows = clinicPatients.filter(
+            (p) => !q || String(p.name).toLowerCase().includes(q)
+        );
+
+        const pages = Math.max(1, Math.ceil(rows.length / 20));
+        const safePage = Math.min(page, pages);
+
+        if (safePage !== page) setPage(safePage);
+        setPatients(rows.slice((safePage - 1) * 20, safePage * 20));
+        setTotalPages(pages);
+    }, [isStaffActor, view, clinicPatients, search, page]);
+
     //new BLOCK 
     // LIVE SEARCH (runs 300ms after you stop typing)
 
@@ -1382,10 +1653,28 @@ useEffect(() => {
                 );
             }
 
+            if (isStaffActor) {
+                // The staff list is rebuilt from all pages, so just reload it
+                setReloadTick((n) => n + 1);
+
+                if (selectedAppointment === appointmentId) {
+                    const detailsResponse = await fetch(
+                        `http://localhost:5000/api/appointments/${appointmentId}`
+                    );
+                    if (detailsResponse.ok) {
+                        setAppointmentDetails(await detailsResponse.json());
+                    }
+                }
+                return;
+            }
+
             const refreshResponse = await fetch(
                 `http://localhost:5000/api/appointments` +
                 `?page=${appointmentPage}` +
                 `&limit=20` +
+                (isStaffActor
+                    ? `&clinic_id=${encodeURIComponent(actor.clinicId)}`
+                    : "") +
                 `&status=${encodeURIComponent(
                     appointmentStatus
                 )}` +
@@ -1444,6 +1733,15 @@ useEffect(() => {
         ? actor.patientId
         : bookingPatientId;
 
+    // Clinic staff can only book for their own clinic
+    const bookingClinic = isStaffActor ? actor.clinicId : bookingClinicId;
+
+    const clinicOptions = isStaffActor
+        ? bookingClinics.filter(
+            (c) => String(c.id) === String(actor.clinicId)
+        )
+        : bookingClinics;
+
     const handleBooking = async () => {
         try {
             setBookingError("");
@@ -1456,7 +1754,7 @@ useEffect(() => {
                 return;
             }
 
-            if (!bookingClinicId) {
+            if (!bookingClinic) {
                 setBookingError(
                     "Please select a clinic"
                 );
@@ -1487,7 +1785,7 @@ useEffect(() => {
                         patient_id:
                             bookingPatient,
                         clinic_id:
-                            bookingClinicId,
+                            bookingClinic,
                         copay_amount:
                             Number(bookingCopay)
                     })
@@ -1525,6 +1823,12 @@ useEffect(() => {
     const auditTarget = isPatientActor
         ? actor.patientId
         : auditPatientId;
+
+    // Clinic staff can only look up patients of their own clinic
+    const clinicPatientIds = new Set(clinicPatients.map((p) => String(p.id)));
+    const auditPatientOptions = isStaffActor
+        ? auditPatients.filter((p) => clinicPatientIds.has(String(p.id)))
+        : auditPatients;
 
     const loadAuditTrail = async () => {
         try {
@@ -1772,6 +2076,13 @@ useEffect(() => {
 
                     <h2>Patients</h2>
 
+                    {isStaffActor && actor.clinicId && (
+                        <p className="actor-scope">
+                            Showing only patients with appointments at{" "}
+                            <strong>{actor.clinicName || "your clinic"}</strong>.
+                        </p>
+                    )}
+
                     <div className="search-container">
 
                         <input
@@ -1803,10 +2114,19 @@ useEffect(() => {
 
                     </div>
 
-                    {loading ? (
+                    {needsClinicPick ? (
+<EmptyState hint='Use the "Acting as" switcher above to choose a clinic.'>
+Select a clinic to see its patients.
+</EmptyState>
+) : (isStaffActor
+    ? staffLoading && clinicPatients.length === 0
+    : loading) ? (
 <LoadingState label="Loading patients..." />
-) : listError ? (
-<ErrorState message={listError} onRetry={retry} />
+) : (isStaffActor ? staffError : listError) ? (
+<ErrorState
+    message={isStaffActor ? staffError : listError}
+    onRetry={retry}
+/>
 ) : patients.length === 0 ? (
 <EmptyState>
 No patients found.
@@ -1956,7 +2276,16 @@ No patients found.
 
                     <h2>Clinics</h2>
 
-                    <div className="search-container">
+                    {isStaffActor && actor.clinicId && (
+                        <p className="actor-scope">
+                            Showing only <strong>{actor.clinicName || "your clinic"}</strong>.
+                        </p>
+                    )}
+
+                    <div
+                        className="search-container"
+                        style={isStaffActor ? { display: "none" } : undefined}
+                    >
 
                         <input
                             className="search-input"
@@ -1989,7 +2318,11 @@ No patients found.
 
                     </div>
 
-                    {loading ? (
+                    {needsClinicPick ? (
+<EmptyState hint='Use the "Acting as" switcher above to choose a clinic.'>
+Select a clinic to continue as its staff.
+</EmptyState>
+) : loading ? (
 <LoadingState label="Loading clinics..." />
 ) : listError ? (
 <ErrorState message={listError} onRetry={retry} />
@@ -2182,6 +2515,14 @@ No clinics found.
 
                     <h2>Appointments</h2>
 
+                    {isStaffActor && actor.clinicId && (
+                        <p className="actor-scope">
+                            Showing only appointments for{" "}
+                            <strong>{actor.clinicName || "your clinic"}</strong>.
+                            Clinic staff can only manage their own clinic.
+                        </p>
+                    )}
+
                     {isPatientActor && actor.patientId && (
                         <p className="actor-scope">
                             Showing only appointments for{" "}
@@ -2261,10 +2602,19 @@ No clinics found.
 <EmptyState hint='Use the "Acting as" switcher above to choose a patient.'>
 Select a patient to see their appointments.
 </EmptyState>
-) : loading ? (
+) : needsClinicPick ? (
+<EmptyState hint='Use the "Acting as" switcher above to choose a clinic.'>
+Select a clinic to see its appointments.
+</EmptyState>
+) : (isStaffActor
+    ? staffLoading && clinicAppointments.length === 0
+    : loading) ? (
 <LoadingState label="Loading appointments..." />
-) : listError ? (
-<ErrorState message={listError} onRetry={retry} />
+) : (isStaffActor ? staffError : listError) ? (
+<ErrorState
+    message={isStaffActor ? staffError : listError}
+    onRetry={retry}
+/>
 ) : appointments.length === 0 ? (
 <EmptyState hint={isPatientActor ? "Book one from the Book Appointment tab." : undefined}>
 No appointments found.
@@ -2562,6 +2912,10 @@ No appointments found.
                         <EmptyState hint='Use the "Acting as" switcher above to choose a patient.'>
                             Select a patient to book on their behalf.
                         </EmptyState>
+                    ) : needsClinicPick ? (
+                        <EmptyState hint='Use the "Acting as" switcher above to choose a clinic.'>
+                            Select a clinic to book appointments for it.
+                        </EmptyState>
                     ) : bookingLoading ? (
                         <LoadingState label="Loading patients and clinics..." />
                     ) : bookingLoadFailed ? (
@@ -2655,8 +3009,9 @@ No appointments found.
                                 <select
                                     className="search-input"
                                     value={
-                                        bookingClinicId
+                                        bookingClinic
                                     }
+                                    disabled={isStaffActor}
                                     onChange={(e) =>
                                         setBookingClinicId(
                                             e.target.value
@@ -2672,7 +3027,13 @@ No appointments found.
                                         Select a clinic
                                     </option>
 
-                                    {bookingClinics.map(
+                                    {isStaffActor && clinicOptions.length === 0 && (
+                                        <option value={actor.clinicId}>
+                                            {actor.clinicName || "Your clinic"}
+                                        </option>
+                                    )}
+
+                                    {clinicOptions.map(
                                         (clinic) => (
                                             <option
                                                 key={
@@ -2999,7 +3360,7 @@ No appointments found.
                                         Select a patient
                                     </option>
 
-                                    {auditPatients.map(
+                                    {auditPatientOptions.map(
                                         (patient) => (
                                             <option
                                                 key={
