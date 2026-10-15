@@ -4,15 +4,11 @@ CS6.302 Software System Development — Assignment 1b (Frontend + API on top of 
 
 | | |
 |---|---|
-| **Team number** | `[FILL: team number]` |
-| **Repository** | `[FILL: repo URL]` |
-| **Final commit hash** | `[FILL: output of git rev-parse HEAD]` |
-| **Demo video (≤ 5 min)** | `[FILL: link]` |
-| **A1 repository we built on** | `[FILL: A1 repo URL / team]` |
-
-## Demo Video
-
-https://drive.google.com/file/d/1-aRV-R6TcWybbtl23oxVzNaSsfdIJ5yi/view?usp=sharing
+| **Team number** | `TEAM 06` |
+| **Repository** | `https://github.com/amaan070/CareConnect_Frontend_Team-6` |
+| **Final commit hash** | `` |
+| **Demo video (≤ 5 min)** | `https://drive.google.com/file/d/1-aRV-R6TcWybbtl23oxVzNaSsfdIJ5yi/view?usp=sharing` |
+| **A1 repository we built on** | `https://github.com/Lockstyles/CareConnect_team_13` |
 
 ## Team and contributions
 
