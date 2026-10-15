@@ -1,9 +1,19 @@
-
 const express = require("express");
 const { getMongoDb } = require("../mongo");
 
 const router = express.Router();
 
+const RADIUS_METERS = 5000;
+
+// GET /api/map/nearest-nurses?latitude=..&longitude=..&limit=..
+//
+// Uses a MongoDB $geoNear stage (backed by the 2dsphere index on
+// NursePings.location) so the database does the radius filtering and distance
+// calculation. Only active pings inside the 5 km radius are read, instead of
+// scanning and sorting every ping in the collection.
+//
+// Each nurse is returned once, using their most recent active ping inside the
+// radius. Results are sorted nearest-first.
 router.get("/nearest-nurses", async (req, res) => {
     try {
         const latitude = Number(req.query.latitude);
@@ -32,75 +42,49 @@ router.get("/nearest-nurses", async (req, res) => {
         const db = getMongoDb();
         const collection = db.collection("NursePings");
 
-        // Select the globally latest ping for each nurse.
-        const latestPings = await collection.aggregate([
+        const nurses = await collection.aggregate([
             {
-                $sort: {
-                    nurse_id: 1,
-                    created_at: -1
+                // Must be the first stage of the pipeline.
+                // GeoJSON order is [longitude, latitude].
+                $geoNear: {
+                    near: {
+                        type: "Point",
+                        coordinates: [longitude, latitude]
+                    },
+                    distanceField: "distance_meters",
+                    maxDistance: RADIUS_METERS,
+                    spherical: true,
+                    query: { is_active: true },
+                    key: "location"
                 }
             },
+            // Keep only the newest ping per nurse within the radius.
+            { $sort: { created_at: -1 } },
             {
                 $group: {
                     _id: "$nurse_id",
                     nurse_id: { $first: "$nurse_id" },
                     location: { $first: "$location" },
-                    is_active: { $first: "$is_active" },
-                    created_at: { $first: "$created_at" }
+                    created_at: { $first: "$created_at" },
+                    distance_meters: { $first: "$distance_meters" }
                 }
             },
+            { $sort: { distance_meters: 1 } },
+            { $limit: limit },
             {
-                $match: {
-                    is_active: true
+                $project: {
+                    _id: 0,
+                    nurse_id: 1,
+                    location: 1,
+                    created_at: 1,
+                    distance_meters: { $round: ["$distance_meters", 1] }
                 }
             }
         ]).toArray();
 
-        // Calculate distance from each latest location.
-        // Coordinates are GeoJSON [longitude, latitude].
-        const toRadians = (degrees) => degrees * Math.PI / 180;
-        const earthRadiusMeters = 6371008.8;
-
-        const distanceMeters = (coordinates) => {
-            const [nurseLongitude, nurseLatitude] = coordinates;
-
-            const dLat = toRadians(nurseLatitude - latitude);
-            const dLng = toRadians(nurseLongitude - longitude);
-            const lat1 = toRadians(latitude);
-            const lat2 = toRadians(nurseLatitude);
-
-            const a =
-                Math.sin(dLat / 2) ** 2 +
-                Math.cos(lat1) *
-                Math.cos(lat2) *
-                Math.sin(dLng / 2) ** 2;
-
-            return 2 * earthRadiusMeters *
-                Math.asin(Math.sqrt(Math.min(1, a)));
-        };
-
-        const nurses = latestPings
-            .map((nurse) => ({
-                nurse_id: nurse.nurse_id,
-                location: nurse.location,
-                created_at: nurse.created_at,
-                distance_meters: distanceMeters(
-                    nurse.location.coordinates
-                )
-            }))
-            .filter((nurse) => nurse.distance_meters <= 5000)
-            .sort((a, b) => a.distance_meters - b.distance_meters)
-            .slice(0, limit)
-            .map((nurse) => ({
-                ...nurse,
-                distance_meters: Math.round(
-                    nurse.distance_meters * 10
-                ) / 10
-            }));
-
         res.json({
             origin: { latitude, longitude },
-            radius_meters: 5000,
+            radius_meters: RADIUS_METERS,
             count: nurses.length,
             nurses
         });

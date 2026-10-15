@@ -30,11 +30,13 @@ CREATE TABLE IF NOT EXISTS appointments (
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- The audit trail must outlive the patient it describes, so deleting a patient
+-- that still has audit rows is rejected (RESTRICT), not cascaded.
 CREATE TABLE IF NOT EXISTS wallet_audit_logs (
     id             UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    patient_id     UUID NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
-    amount_changed DECIMAL(10,2) NOT NULL,
-    action_type    VARCHAR(50)  NOT NULL,   -- e.g. 'APPOINTMENT_DEDUCTION', 'TOPUP', 'REFUND'
+    patient_id     UUID NOT NULL REFERENCES patients(id) ON DELETE RESTRICT,
+    amount_changed DECIMAL(10,2) NOT NULL,   -- signed: new balance - old balance
+    action_type    VARCHAR(50)  NOT NULL,   -- e.g. 'DEDUCTION', 'CREDIT'
     balance_after  DECIMAL(10,2) NOT NULL,
     "timestamp"    TIMESTAMPTZ NOT NULL DEFAULT now()
 );

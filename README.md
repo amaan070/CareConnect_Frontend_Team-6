@@ -1,80 +1,71 @@
 # CareConnect — On-Demand Telemedicine (Project 4)
 
-CS6.302 Software System Development — Assignment 1: Database Design
-Team 13
+CS6.302 Software System Development — Assignment 1b (Frontend + API on top of the A1 databases)
 
-**GitHub Repository:** `https://github.com/Lockstyles/CareConnect_team_13`
+| | |
+|---|---|
+| **Team number** | `[FILL: team number]` |
+| **Repository** | `[FILL: repo URL]` |
+| **Final commit hash** | `[FILL: output of git rev-parse HEAD]` |
+| **Demo video (≤ 5 min)** | `[FILL: link]` |
+| **A1 repository we built on** | `[FILL: A1 repo URL / team]` |
+
+## Team and contributions
+
+| Member | Roll no. | Contribution |
+|---|---|---|
+| `[FILL]` | `[FILL]` | `[FILL: e.g. Postgres routes — patients, clinics, appointments, booking]` |
+| `[FILL]` | `[FILL]` | `[FILL: e.g. Analytics screens, materialized view refresh]` |
+| `[FILL]` | `[FILL]` | `[FILL: e.g. MongoDB routes — map ($geoNear), reviews ($facet)]` |
+| `[FILL]` | `[FILL]` | `[FILL: e.g. Wireframes, API doc, design system, demo video]` |
 
 ---
 
 ## 1. Overview
 
-CareConnect models a telemedicine platform's data layer across two databases:
+CareConnect has two databases and a thin web layer on top:
 
-- **PostgreSQL** — patients, clinics, appointments, and an immutable wallet audit trail
-  (transactional, consistency-critical data).
-- **MongoDB** — flexible medical catalogs, patient reviews, and real-time nurse
-  location pings (schema-flexible, high-write, geospatial data).
+- **PostgreSQL** — patients, clinics, appointments and the wallet audit trail (transactional data).
+- **MongoDB** — medical catalogs, patient reviews and nurse location pings (flexible, geospatial data).
+- **`api/`** — Node.js + Express REST API talking to both databases (port 5000).
+- **`web/`** — React + Vite frontend (Leaflet for the map).
+
+### Screens
+
+| Screen | Data source |
+|---|---|
+| Patients, Clinics, Appointments (pagination, search, detail) | PostgreSQL |
+| Book appointment (HSA before/after, friendly errors, new audit row) | PostgreSQL stored procedure `book_appointment` |
+| Appointment status updates | PostgreSQL (WAITING → IN_CONSULTATION → DISCHARGED) |
+| Audit trail (date filter, running balance) | PostgreSQL `wallet_audit_logs` |
+| Analytics (7-day moving average, `DENSE_RANK`, monthly discharges with refresh) | PostgreSQL window functions + materialized view |
+| Nearby nurses map (5 km, distance-sorted list, polls every 10 s) | MongoDB `$geoNear` |
+| Reviews analytics and medical catalog | MongoDB `$facet` + `MedicalCatalogs` |
 
 ---
 
-## 2. Setup Instructions
+## 2. Setup
 
 ### 2.1 Prerequisites
 
-- PostgreSQL 16 and MongoDB 7 
-- Python 3.10+ with `pip`
-- brew install postgresql@16
-- brew services start postgresql@16
+- PostgreSQL 16, MongoDB 7
+- Node.js 20+ and npm
+- Python 3.10+ (for the seeders)
 
-- brew tap mongodb/brew
-- brew install mongodb-community@7.0
-- brew services start mongodb-community@7.0
+### 2.2 Databases
 
-### 2.2 Start the databases
+Create the Postgres user and database, then start MongoDB:
 
-**MacOS**
 ```bash
 psql postgres
 CREATE USER admin WITH PASSWORD '<your-password>';
-
-# Inside the psql prompt:
 CREATE DATABASE "CareConnect" OWNER admin;
 \q
-psql -U admin -d CareConnect 
-
-mongosh
-use careconnect
 ```
 
-**Ubuntu**
-```bash
-sudo apt update
-sudo apt install -y postgresql postgresql-contrib
-sudo systemctl start postgresql
-sudo systemctl enable postgresql
+Ubuntu and macOS install steps for both databases are the same as in A1 (`brew install postgresql@16 mongodb-community@7.0`, or the apt packages for Ubuntu).
 
-curl -fsSL https://pgp.mongodb.com/server-7.0.asc | sudo gpg -o /usr/share/keyrings/mongodb-server-7.0.gpg --dearmor
-echo "deb [signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg arch=amd64] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
-sudo apt update
-sudo apt install -y mongodb-org
-sudo systemctl start mongod
-sudo systemctl enable mongod
-
-sudo -u postgres psql
-
-# Inside the psql prompt:
-CREATE USER admin WITH PASSWORD '<your_password>';
-CREATE DATABASE "CareConnect" OWNER admin;
-\q
-
-psql -h localhost -U admin -d CareConnect
-
-mongosh
-use careconnect
-```
-
-### 2.3 Apply the PostgreSQL schema (run in order)
+### 2.3 Schema, indexes, triggers, procedures, views
 
 ```bash
 psql -h localhost -U admin -d CareConnect -f sql/01_schema_ddl.sql
@@ -82,25 +73,21 @@ psql -h localhost -U admin -d CareConnect -f sql/02_indexes.sql
 psql -h localhost -U admin -d CareConnect -f sql/03_triggers_and_audit.sql
 psql -h localhost -U admin -d CareConnect -f sql/04_stored_procedures.sql
 psql -h localhost -U admin -d CareConnect -f sql/05_materialized_views.sql
-psql -h localhost -U admin -d CareConnect -f sql/06_window_analytics.sql
-```
 
-
-### 2.4 Set up MongoDB collections and indexes
-
-```bash
 mongosh careconnect mongo/01_collections_and_indexes.js
 ```
 
-### 2.5 Seed mock data
+`sql/06_window_analytics.sql` is the standalone window-analytics query from A1 (not required for the app).
+
+### 2.4 Seed data
 
 ```bash
 cd data_generation
 python3 -m venv venv
-source venv/bin/activate      # on Windows: venv\Scripts\activate
+source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-export PG_DSN='dbname=CareConnect user=postgres password=<your_password> host=localhost port=5432'
+export PG_DSN='dbname=CareConnect user=admin password=<your-password> host=localhost port=5432'
 export MONGO_URI='mongodb://localhost:27017'
 export MONGO_DB_NAME='careconnect'
 
@@ -108,174 +95,90 @@ python postgres_seeder.py
 python mongo_seeder.py
 ```
 
-This generates:
-- 100 clinics, 5,000 patients, 100,000 appointments, 100,000 wallet audit logs (PostgreSQL)
-- 500,000 nurse pings, 5,000 patient reviews, 200 medical catalog entries (MongoDB)
+Seeds 100 clinics, 5,000 patients, 100,000 appointments and 100,000 audit rows in Postgres, and 500,000 nurse pings, 5,000 reviews and 200 catalog entries in MongoDB.
 
-### 2.6 Run the workflows
+> **Demo note:** nurse pings have a 2-hour TTL (`expireAfterSeconds: 7200`). If the map is empty, re-run `python mongo_seeder.py` shortly before the demo.
+
+### 2.5 Run the API
+
+Create `api/.env`:
+
+```
+PG_HOST=localhost
+PG_PORT=5432
+PG_DATABASE=CareConnect
+PG_USER=admin
+PG_PASSWORD=<your-password>
+MONGODB_URI=mongodb://127.0.0.1:27017
+```
 
 ```bash
-cd ..
-psql -h localhost -U admin -d CareConnect -f sql/06_window_analytics.sql
-mongosh careconnect mongo/02_workflow3_geonear.js
-mongosh careconnect mongo/03_workflow4_facet.js
-mongosh careconnect --quiet --eval '
-JSON.stringify({
-  workflow3_nearest_nurse: db.NursePings.aggregate([
-    { $geoNear: { near: { type: "Point", coordinates: [80.2707, 13.0827] }, distanceField: "distance_meters", spherical: true, query: { is_active: true }, key: "location" } },
-    { $sort: { distance_meters: 1 } },
-    { $limit: 1 }
-  ], { explain: "executionStats" }),
-  workflow4_review_analytics: db.PatientReviews.aggregate([
-    { $facet: {
-        rating_buckets: [{ $group: { _id: "$rating", count: { $sum: 1 } } }],
-        top_tags: [{ $unwind: "$tags" }, { $group: { _id: "$tags", count: { $sum: 1 } } }, { $sort: { count: -1 } }, { $limit: 5 }],
-        overall_average: [{ $group: { _id: null, avg: { $avg: "$rating" } } }]
-    }}
-  ], { explain: "executionStats" })
-}, null, 2)
-' > performance/mongo_execution_stats.json
+cd api
+npm install
+node server.js        # http://localhost:5000
 ```
+
+Health checks: `GET /api/test-db` and `GET /api/test-mongo`.
+
+### 2.6 Run the frontend
+
+```bash
+cd web
+npm install
+npm run dev           # http://localhost:5173
+```
+
+The frontend calls the API at `http://localhost:5000`, so start the API first.
 
 ---
 
-## 3. Assumptions
+## 3. Design decisions and assumptions
 
-- All primary keys are `UUID`s (via `uuid-ossp`) rather than sequential integers,
-  since the assignment allows either.
-- `appointments.status` is implemented as a Postgres `ENUM` type rather than a
-  plain `VARCHAR`, for stricter validation at the database level.
-- `wallet_audit_logs.action_type` records `'DEDUCTION'` or `'CREDIT'` (renamed
-  slightly from the sample `DEBIT`/`CREDIT` wording in the spec) to match the
-  appointment-copay use case.
-- Deleting a patient cascades to their appointments and audit logs
-  (`ON DELETE CASCADE`); deleting a clinic that still has appointments is
-  restricted (`ON DELETE RESTRICT`) to avoid orphaned records.
-- Seed data is geographically clustered around the Chennai metro area
-  (latitude 12.90–13.20, longitude 80.10–80.35) as a representative sample region.
-- Appointment timestamps are randomly distributed across the last 180 days;
-  nurse ping timestamps are randomly distributed across the last 4 hours so a
-  meaningful fraction remain within the 2-hour TTL window at query time.
-- MongoDB collections use `validationLevel: "moderate"` — new documents must
-  satisfy the `$jsonSchema` validator, but this does not retroactively enforce
-  structure on pre-existing documents.
-- The materialized view aggregates discharge counts by **calendar month**
-  (`date_trunc('month', created_at)`), matching "total monthly patient discharges."
+- **UUID primary keys** (`uuid-ossp`), and `appointments.status` as a Postgres `ENUM`.
+- **One active appointment per patient** is enforced by the partial unique index `idx_active_consult` (status `WAITING` or `IN_CONSULTATION`). The booking API turns the resulting `23505` error into "Patient already has an active appointment".
+- **Booking** runs in one transaction: it locks the patient row (`FOR UPDATE`), reads the HSA balance, calls `book_appointment`, reads the balance again and returns before/after plus the audit row written by the trigger. Procedure errors (`P0001`, e.g. insufficient balance) are returned as readable 400 messages.
+- **Audit trail** is written by a trigger on `patients.hsa_balance`. `amount_changed` is stored signed (`NEW - OLD`), so the running balance column is a plain window `SUM`. Entries are shown newest first.
+- **Analytics** — the clinic-revenue endpoint counts the copay of `DISCHARGED` appointments by day, takes a 7-row moving average per clinic and ranks clinics per day with `DENSE_RANK`. The monthly discharge summary reads the materialized view `mv_clinic_monthly_discharges`; the refresh button runs `REFRESH MATERIALIZED VIEW`.
+- **Nearby nurses** — `GET /api/map/nearest-nurses` uses a `$geoNear` stage on the `2dsphere` index with `maxDistance: 5000` and `is_active: true`. It returns each nurse once (their newest active ping inside the radius), sorted nearest first. A nurse whose newest ping is outside the radius, or is inactive, is not listed.
+- **Actor switcher** — a demo-only role/patient switcher (stored in the browser). It is not real authentication.
+- **Seed geography** — clusters around Chennai (lat 12.90–13.20, lon 80.10–80.35).
 
 ---
 
-## 4. Performance Proof
+## 4. Performance evidence
 
-### 4.1 Workflow 2 — SQL Window Analytics (`EXPLAIN ANALYZE`)
+- `performance/postgres_explain_analyzes.txt` — `EXPLAIN ANALYZE` of the window analytics query (uses `idx_appointments_clinic_id`, no sequential scan on `appointments`).
+- `performance/mongo_execution_stats.json` — `executionStats` for the `$geoNear` and `$facet` workflows.
 
-```
-                                                                                              QUERY PLAN                                                                                              
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Incremental Sort  (cost=30458.95..38412.15 rows=100000 width=128) (actual time=91.971..97.814 rows=18020.00 loops=1)
-   Sort Key: moving_avg.revenue_day, (dense_rank() OVER w1)
-   Presorted Key: moving_avg.revenue_day
-   Full-sort Groups: 181  Sort Method: quicksort  Average Memory: 29kB  Peak Memory: 29kB
-   Pre-sorted Groups: 181  Sort Method: quicksort  Average Memory: 31kB  Peak Memory: 31kB
-   Buffers: shared hit=68852
-   ->  WindowAgg  (cost=30425.28..32675.26 rows=100000 width=128) (actual time=91.913..95.848 rows=18020.00 loops=1)
-         Window: w1 AS (PARTITION BY moving_avg.revenue_day ORDER BY moving_avg.moving_avg_7day ROWS UNBOUNDED PRECEDING)
-         Storage: Memory  Maximum Storage: 17kB
-         Buffers: shared hit=68849
-         ->  Sort  (cost=30425.26..30675.26 rows=100000 width=88) (actual time=91.907..92.241 rows=18020.00 loops=1)
-               Sort Key: moving_avg.revenue_day, moving_avg.moving_avg_7day DESC
-               Sort Method: quicksort  Memory: 1871kB
-               Buffers: shared hit=68849
-               ->  Subquery Scan on moving_avg  (cost=121.61..17332.44 rows=100000 width=88) (actual time=4.082..86.644 rows=18020.00 loops=1)
-                     Buffers: shared hit=68846
-                     ->  WindowAgg  (cost=121.61..17332.44 rows=100000 width=88) (actual time=4.080..85.548 rows=18020.00 loops=1)
-                           Window: w1 AS (PARTITION BY appointments.clinic_id ORDER BY (date_trunc('day'::text, appointments.created_at)) RANGE BETWEEN '6 days'::interval PRECEDING AND CURRENT ROW)
-                           Storage: Memory  Maximum Storage: 17kB
-                           Buffers: shared hit=68846
-                           ->  GroupAggregate  (cost=121.09..15582.44 rows=100000 width=56) (actual time=4.031..71.355 rows=18020.00 loops=1)
-                                 Group Key: appointments.clinic_id, (date_trunc('day'::text, appointments.created_at))
-                                 Buffers: shared hit=68846
-                                 ->  Incremental Sort  (cost=121.09..13332.44 rows=100000 width=30) (actual time=3.986..59.709 rows=100000.00 loops=1)
-                                       Sort Key: appointments.clinic_id, (date_trunc('day'::text, appointments.created_at))
-                                       Presorted Key: appointments.clinic_id
-                                       Full-sort Groups: 100  Sort Method: quicksort  Average Memory: 28kB  Peak Memory: 28kB
-                                       Pre-sorted Groups: 100  Sort Method: quicksort  Average Memory: 97kB  Peak Memory: 97kB
-                                       Buffers: shared hit=68846
-                                       ->  Index Scan using idx_appointments_clinic_id on appointments  (cost=0.29..7097.55 rows=100000 width=30) (actual time=0.050..44.368 rows=100000.00 loops=1)
-                                             Index Searches: 1
-                                             Buffers: shared hit=68843
- Planning:
-   Buffers: shared hit=191
- Planning Time: 2.035 ms
- Execution Time: 98.421 ms
-(36 rows)
-```
+---
 
-**Verdict:** the base scan on `appointments` uses `Index Scan using idx_appointments_clinic_id`
-— not a `Seq Scan` — confirming the query hits the index from `02_indexes.sql`.
-Total execution time: **91.6ms** over 100,000 appointment rows.
+## 5. Documentation
 
-### 4.2 Workflow 3 & 4
+- `docs/api_endpoints.md` — API reference
+- `docs/handover_note.md` — handover note
+- `docs/design/` — 8 wireframes and API sketches
+- `docs/relational_erd.png`, `docs/mongo_schema_map.json` — data model
+
+---
+
+## 6. Repository structure
 
 ```
-
-{
-  "workflow3_nearest_nurse": {
-    "explainVersion": "1",
-    "stages": [
-      {
-        "$geoNearCursor": {
-          "queryPlanner": {
-            "namespace": "careconnect.NursePings",
-            "indexFilterSet": false,
-            "parsedQuery": {
-              "$and": [
-                {
-                  "is_active": {
-                    "$eq": true
-                  }
-                },
-                {
-                  "location": {
-                    "$nearSphere": {
-                      "type": "Point",
-                      "coordinates": [
-                        80.2707,
-                        13.0827
-                      ]
-                    }
-                  }
-                }
-              ]
-            },
-
-The output file was too long so these are the first 20 lines, and the rest of the output is in the mongo_execution_stats.json
-
-```
-
-## 5. Repository Structure
-
-```
-team_13_a1/
+<team_number>_a1b/
 ├── README.md
-├── docs/
-│   ├── relational_erd.png
-│   └── mongo_schema_map.json
-├── sql/
-│   ├── 01_schema_ddl.sql
-│   ├── 02_indexes.sql
-│   ├── 03_triggers_and_audit.sql
-│   ├── 04_stored_procedures.sql
-│   ├── 05_materialized_views.sql
-│   └── 06_window_analytics.sql
-├── mongo/
-│   ├── 01_collections_and_indexes.js
-│   ├── 02_workflow3_geonear.js
-│   └── 03_workflow4_facet.js
-├── data_generation/
-│   ├── postgres_seeder.py
-│   ├── mongo_seeder.py
-│   └── requirements.txt
-└── performance/
-    ├── postgres_explain_analyzes.txt
-    └── mongo_execution_stats.json
+├── api/            Express API (routes/, db.js, mongo.js, server.js)
+├── web/            React + Vite frontend
+├── sql/            Postgres schema, indexes, triggers, procedures, views
+├── mongo/          Collections, indexes, workflow scripts
+├── data_generation/  Seeders
+├── performance/    EXPLAIN / executionStats evidence
+└── docs/           API doc, handover note, wireframes, ERD
 ```
+
+---
+
+## 7. Known limitations
+
+- Run end to end only after completing the setup above; fill in the commit hash and demo link before submitting.
+- The audit trail endpoint returns all rows for a patient (no pagination yet).
+- The API base URL is hard-coded to `http://localhost:5000` in the frontend.

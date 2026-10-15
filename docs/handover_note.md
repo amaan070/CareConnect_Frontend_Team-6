@@ -1,37 +1,39 @@
 # CareConnect – Handover Note
 
-**Scope:** comparison of the original backend (`CareConnect_team_13-main`) with our updated version (`13_a1`).
-**Method:** file-by-file diff and code review. We did not run either version end to end, so "worked / did not work" below reflects what the code shows, not observed runtime behaviour.
+**Audience:** the team that picks this project up next.
+**What this covers:** the state of the database layer, API and frontend as we hand them over, and the changes we made on top of the A1 database design.
+**How we checked:** by reading the code and running the SQL and Mongo scripts as described in the README. `[FILL: state honestly what you ran end to end and what you did not]`
 
-## What worked
-- **Schema design:** sensible constraints (`hsa_balance >= 0`, coordinate range checks) and a partial unique index (`idx_active_consult`) that enforces one active appointment per patient.
-- **`book_appointment` procedure:** locks the patient row (`FOR UPDATE`), then checks the clinic and balance before deducting. This is safe against concurrent double-spend.
-- **Analytics layer:** indexes, materialized view and window queries were sound and needed no changes.
-- **MongoDB layer:** collection validation, `2dsphere` index and the TTL index on `NursePings` are well documented in `mongo/01_collections_and_indexes.js`.
-- **Seeders:** generate realistic volume (100k appointments, 500k nurse pings) with exact status counts.
-
-## What did not work (or was risky)
-- `wallet_audit_logs` could be edited or deleted, and `ON DELETE CASCADE` meant deleting a patient silently erased their audit history.
-- The Postgres seeder was not re-runnable: running it twice stacked duplicate data.
-- The seeder writes audit rows (`APPOINTMENT_DEDUCTION`, negative amount) in a different form from the trigger's rows (`DEDUCTION`).
-- The 2-hour TTL on `NursePings` means seeded nurses disappear after two hours, which looks like a bug when demoing a few hours after seeding.
-- The seeder contained a `<your_password>` placeholder default, which made a hardcoded password easy to introduce.
+## What works
+- **Schema:** sensible constraints (`hsa_balance >= 0`, coordinate range checks) and a partial unique index `idx_active_consult` that allows only one `WAITING` / `IN_CONSULTATION` appointment per patient.
+- **Booking:** the `book_appointment` procedure locks the patient row (`FOR UPDATE`), checks the clinic and the balance, then deducts. The API wraps it in one transaction and returns the HSA balance before and after, plus the audit row. Errors are turned into readable messages (insufficient balance → 400, active appointment already exists → 409).
+- **Audit trail:** every balance change is logged by a trigger. The table is now append-only (see below).
+- **Analytics:** window-function revenue query (7-row moving average, `DENSE_RANK`) and the `mv_clinic_monthly_discharges` materialized view with a refresh endpoint.
+- **MongoDB:** collection validation, a `2dsphere` index and a TTL index on `NursePings`. The nearby-nurses endpoint uses `$geoNear` within 5 km.
 
 ## What we changed and why
 | File | Change | Reason |
 |---|---|---|
-| `sql/03_triggers_and_audit.sql` | Trigger now fires only on `UPDATE OF hsa_balance` when the value actually changes; `amount_changed` stored as `ABS(...)` | Avoid needless trigger calls; record a magnitude with `action_type` giving direction |
-| `sql/03_triggers_and_audit.sql` | Added `fn_protect_wallet_audit()` with row-level (UPDATE/DELETE) and TRUNCATE triggers | Make the audit trail append-only |
-| `sql/01_schema_ddl.sql` | `wallet_audit_logs.patient_id` changed to `ON DELETE RESTRICT` | Audit history must not vanish with a patient |
-| `data_generation/postgres_seeder.py` | Wipes existing data before seeding (temporarily disables the audit protection trigger) | Seeder can now be re-run safely |
-| `README.md` | Added final commit hash | Submission traceability |
+| `sql/03_triggers_and_audit.sql` | Balance trigger now fires only on `UPDATE OF hsa_balance` and logs only when the value changes | Avoid needless trigger calls |
+| `sql/03_triggers_and_audit.sql` | Added `fn_protect_wallet_audit()` with a row-level trigger (UPDATE/DELETE) and a TRUNCATE trigger on `wallet_audit_logs` | Make the audit trail append-only; inserts are still allowed |
+| `sql/01_schema_ddl.sql` | `wallet_audit_logs.patient_id` changed from `ON DELETE CASCADE` to `ON DELETE RESTRICT` | Deleting a patient must not erase their audit history |
+| `api/routes/map.js` | Nearby nurses now use a `$geoNear` stage instead of grouping all pings and computing distance in JavaScript | Let the database use the geospatial index and read only pings inside the radius |
+| `README.md` | Rewritten for A1b (setup for API and web, team and submission details) | Submission traceability |
 
-**Trade-off to be aware of:** storing `ABS(amount)` loses the sign, so any query that sums `amount_changed` (for example a running balance in an API) must sign it by `action_type`.
+**Sign convention:** `amount_changed` is stored **signed** (`new balance − old balance`) and `action_type` (`DEDUCTION` / `CREDIT`) repeats the direction. A running total is therefore a plain `SUM(amount_changed)`.
 
-## Suggestions for the original authors
-1. **Be consistent about audit rows.** Make the seeder write the same `action_type` and amount convention as the trigger, and decide once whether `amount_changed` is signed.
-2. **Keep credentials out of source.** Read the DSN only from `PG_DSN`, never hardcode a password, and add a `.env.example`.
-3. **Provide a migration** (`ALTER TABLE ... DROP/ADD CONSTRAINT`, re-run triggers) because `CREATE TABLE IF NOT EXISTS` will not update an existing database.
-4. **Document the TTL** and offer a nurses-only reseed option for demos.
-5. **Index for the nearest-nurse query** (`nurse_id, created_at`) and consider `$geoNear` instead of sorting and grouping all pings.
-6. **Add `start` and `seed` npm scripts** and a short setup section in the README.
+**Note on the audit protection:** the triggers stop normal application and user access. A database superuser or table owner can still disable them (`ALTER TABLE ... DISABLE TRIGGER`), so this is protection against mistakes and misuse, not against a malicious DBA.
+
+## Known issues and limitations
+- **Seeder and trigger use different `action_type` values.** The trigger writes `DEDUCTION` / `CREDIT`; the seeder writes `APPOINTMENT_DEDUCTION` for its generated rows. Both are valid for the column, but queries that filter on `action_type` must handle both. Not changed yet.
+- **The Postgres seeder is not re-runnable.** It only inserts. Run it on a fresh database, or drop and recreate the database first. (`TRUNCATE` and `DELETE` on `wallet_audit_logs` are now blocked by design.)
+- **Existing databases need a migration.** `CREATE TABLE IF NOT EXISTS` does not change an existing table. On a database created before this change, re-create it from `sql/01` to `sql/05`, or run `ALTER TABLE wallet_audit_logs DROP CONSTRAINT wallet_audit_logs_patient_id_fkey, ADD CONSTRAINT wallet_audit_logs_patient_id_fkey FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE RESTRICT;` and then re-run `sql/03_triggers_and_audit.sql`.
+- **Nurse pings expire after 2 hours (TTL).** Seeded nurses disappear after two hours, so re-run `mongo_seeder.py` shortly before a demo.
+- **Seeder DSN placeholder.** `postgres_seeder.py` falls back to a placeholder password if `PG_DSN` is not set. Always set `PG_DSN` from the environment and never commit a real password.
+- **Audit endpoint has no pagination.** `GET /api/audit-logs/:patientId` returns all rows for the patient.
+
+## Suggestions for whoever continues
+1. Make the seeder write the same `action_type` as the trigger.
+2. Add a `.env.example` for the API and `start` / `seed` npm scripts.
+3. Add pagination to the audit endpoint and a way to create a new nurse ping for demos.
+4. Add automated tests for booking (insufficient balance, duplicate active appointment) and for the append-only audit triggers.
