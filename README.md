@@ -14,11 +14,10 @@ CS6.302 Software System Development — Assignment 1b (Frontend + API on top of 
 
 | Member | Roll no. | Contribution |
 |---|---|---|
-| `[FILL]` | `[FILL]` | `[FILL: e.g. Postgres routes — patients, clinics, appointments, booking]` |
-| `[FILL]` | `[FILL]` | `[FILL: e.g. Analytics screens, materialized view refresh]` |
-| `[FILL]` | `[FILL]` | `[FILL: e.g. MongoDB routes — map ($geoNear), reviews ($facet)]` |
-| `[FILL]` | `[FILL]` | `[FILL: e.g. Wireframes, API doc, design system, demo video]` |
-
+| `Amaan Ahmad` | `2026201032` | MongoDB layer — `api/mongo.js` connection, nearby nurses route (`$geoNear`, 5 km, newest ping per nurse) and Leaflet map screen with 10 s polling, reviews analytics (`$facet`) and medical catalog routes/screens, Mongo seeding and `executionStats` performance evidence |
+| `Dhruv Bhuva` | `2026201036` | Booking and appointment workflow — booking transaction route (`FOR UPDATE` lock, HSA before/after, `P0001`/`23505` error mapping), Book Appointment screen, appointment status route (WAITING → IN_CONSULTATION → DISCHARGED), API tests (`booking.test.js`, `appointmentStatus.test.js`, test helpers) |
+| `Antariksha Jana` | `2026202018` | Frontend shell and design — React + Vite app structure, actor switcher, error boundary and loading/empty/error state views, styling, all 8 wireframes and API sketches, design README, main README |
+| `Nikhilesh Patil` | `2026201010` | Postgres browse and analytics — patients, clinics and appointments routes and screens (pagination, search, detail), audit trail route and screen (date filter, running balance), analytics routes and screen (7-day moving average, `DENSE_RANK`, materialized view refresh), `EXPLAIN ANALYZE` evidence, API endpoint doc, handover note, demo video |
 ---
 
 ## 1. Overview

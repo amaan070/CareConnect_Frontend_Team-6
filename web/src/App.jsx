@@ -3693,18 +3693,6 @@ No appointments found.
                         <div className="analytics-header">
                             <div>
                                 <h3>Clinic Revenue Ranking</h3>
-                                <p>
-                                    Ranked with DENSE_RANK() for{" "}
-                                    <strong>
-                                        {formatDateKey(latestDate, {
-                                            month: "long",
-                                            day: "numeric",
-                                            year: "numeric"
-                                        })}
-                                    </strong>
-                                    . Clinics with equal revenue share a
-                                    rank, and the next rank is not skipped.
-                                </p>
                             </div>
                         </div>
 
