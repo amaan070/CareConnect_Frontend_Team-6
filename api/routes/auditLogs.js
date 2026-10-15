@@ -36,8 +36,11 @@ router.get("/:patientId", async (req, res) => {
             query += ` AND timestamp <= $${params.length}`;
         }
 
+        // Show the newest entry first so a fresh booking is visible immediately.
+        // running_change above is still computed oldest-to-newest (its own
+        // OVER (ORDER BY ...)), so the running totals stay correct.
         query += `
-            ORDER BY timestamp ASC, id ASC
+            ORDER BY timestamp DESC, id DESC
         `;
 
         const result = await pool.query(query, params);

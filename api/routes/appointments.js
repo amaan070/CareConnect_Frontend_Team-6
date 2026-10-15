@@ -10,6 +10,17 @@ router.get("/", async (req, res) => {
         const limit = parseInt(req.query.limit) || 20;
         const status = req.query.status || "";
         const search = req.query.search || "";
+        const patientId = req.query.patient_id || "";
+
+        // Reject malformed ids with a clear 400 instead of a Postgres error
+        const uuidPattern =
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+        if (patientId && !uuidPattern.test(patientId)) {
+            return res.status(400).json({
+                error: "patient_id must be a valid UUID"
+            });
+        }
 
         const offset = (page - 1) * limit;
 
@@ -35,13 +46,15 @@ router.get("/", async (req, res) => {
                     p.name ILIKE $2
                     OR c.name ILIKE $2
                 )
+                AND ($5 = '' OR a.patient_id::text = $5)
              ORDER BY a.created_at DESC
              LIMIT $3 OFFSET $4`,
             [
                 status,
                 `%${search}%`,
                 limit,
-                offset
+                offset,
+                patientId
             ]
         );
 
@@ -58,10 +71,12 @@ router.get("/", async (req, res) => {
                 (
                     p.name ILIKE $2
                     OR c.name ILIKE $2
-                )`,
+                )
+                AND ($3 = '' OR a.patient_id::text = $3)`,
             [
                 status,
-                `%${search}%`
+                `%${search}%`,
+                patientId
             ]
         );
 

@@ -2,6 +2,28 @@ import { useEffect, useState } from "react";
 import { MapContainer, TileLayer, CircleMarker, Popup, Circle } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import "./App.css";
+import { LoadingState, ErrorState, EmptyState } from "./components/StateViews.jsx";
+import ActorSwitcher from "./components/ActorSwitcher.jsx";
+
+const ACTOR_STORAGE_KEY = "careconnect.demoActor";
+const DEFAULT_ACTOR = { role: "admin", patientId: "", patientName: "" };
+
+const loadStoredActor = () => {
+    try {
+        const raw = window.localStorage.getItem(ACTOR_STORAGE_KEY);
+        if (!raw) return DEFAULT_ACTOR;
+        const parsed = JSON.parse(raw);
+        return ["admin", "staff", "patient"].includes(parsed?.role)
+            ? {
+                role: parsed.role,
+                patientId: parsed.patientId || "",
+                patientName: parsed.patientName || ""
+            }
+            : DEFAULT_ACTOR;
+    } catch {
+        return DEFAULT_ACTOR;
+    }
+};
 
 const STATUS_LABELS = {
     WAITING: "Waiting",
@@ -546,6 +568,46 @@ const refreshDischargeAnalytics = async () => {
 
     const [view, setView] = useState("patients");
 
+    // Demo actor switcher (no real login)
+    const [actor, setActor] = useState(loadStoredActor);
+    const isPatientActor = actor.role === "patient";
+    const needsPatientPick = isPatientActor && !actor.patientId;
+    const canAdvanceStatus = !isPatientActor;
+
+    // Bump to re-run a failed fetch from a "Try again" button
+    const [reloadTick, setReloadTick] = useState(0);
+    const retry = () => setReloadTick((n) => n + 1);
+
+    // Per-screen errors so a failed list shows an error (not "No results")
+    const [listError, setListError] = useState("");
+    const [actionError, setActionError] = useState("");
+    const [bookingLoadFailed, setBookingLoadFailed] = useState(false);
+
+    const handleActorChange = (next) => {
+        setActor(next);
+        setActionError("");
+        setBookingError("");
+        setBookingResult(null);
+        setAppointmentPage(1);
+        setSelectedAppointment(null);
+        setAuditLogs([]);
+        setAuditPatientId(next.role === "patient" ? next.patientId : "");
+        if (
+            next.role === "patient" &&
+            (view === "patients" || view === "analytics")
+        ) {
+            setView("appointments");
+        }
+        try {
+            window.localStorage.setItem(
+                ACTOR_STORAGE_KEY,
+                JSON.stringify(next)
+            );
+        } catch {
+            // storage unavailable - the switcher still works for this session
+        }
+    };
+
     const [loading, setLoading] = useState(true);
     const [initialLoadDone, setInitialLoadDone] = useState(false);
     const [error, setError] = useState("");
@@ -703,7 +765,7 @@ const refreshDischargeAnalytics = async () => {
         cancelled = true;
         clearInterval(intervalId);
     };
-}, [view, mapLatitude, mapLongitude]);
+}, [view, mapLatitude, mapLongitude, reloadTick]);
 
 useEffect(() => {
     if (view !== "analytics") {
@@ -778,7 +840,7 @@ useEffect(() => {
         cancelled = true;
     };
 
-}, [view]);
+}, [view, reloadTick]);
 
 
 useEffect(() => {
@@ -838,7 +900,7 @@ useEffect(() => {
     return () => {
         cancelled = true;
     };
-}, [view]);
+}, [view, reloadTick]);
 
 
     useEffect(() => {
@@ -849,6 +911,7 @@ useEffect(() => {
             try {
                 setLoading(true);
                 setError("");
+                setListError("");
 
                 const response = await fetch(
                     `http://localhost:5000/api/patients?page=${page}&limit=20&search=${encodeURIComponent(
@@ -868,7 +931,7 @@ useEffect(() => {
                 setTotalPages(data.totalPages);
             } catch (err) {
                 console.error(err);
-                setError("Failed to load patients");
+                if (!cancelled) setListError("Could not load patients. Check that the API is running.");
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -879,7 +942,7 @@ useEffect(() => {
             cancelled = true;
         };
 
-    }, [view, page, search]);
+    }, [view, page, search, reloadTick]);
 
     // =========================
     // FETCH PATIENT DETAILS
@@ -928,6 +991,7 @@ useEffect(() => {
             try {
                 setLoading(true);
                 setError("");
+                setListError("");
 
                 const response = await fetch(
                     `http://localhost:5000/api/clinics?page=${clinicPage}&limit=20&search=${encodeURIComponent(
@@ -947,7 +1011,7 @@ useEffect(() => {
                 setClinicTotalPages(data.totalPages);
             } catch (err) {
                 console.error(err);
-                setError("Failed to load clinics");
+                if (!cancelled) setListError("Could not load clinics. Check that the API is running.");
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -959,7 +1023,7 @@ useEffect(() => {
             cancelled = true;
         };
 
-    }, [view, clinicPage, clinicSearch]);
+    }, [view, clinicPage, clinicSearch, reloadTick]);
 
     // =========================
     // FETCH CLINIC DETAILS
@@ -1002,17 +1066,28 @@ useEffect(() => {
     useEffect(() => {
         if (view !== "appointments") return;
 
+        // A patient actor with nobody selected must never see everyone's data
+        if (needsPatientPick) {
+            setAppointments([]);
+            setListError("");
+            return;
+        }
+
         let cancelled = false;
 
         const fetchAppointments = async () => {
             try {
                 setLoading(true);
                 setError("");
+                setListError("");
 
                 const url =
                     `http://localhost:5000/api/appointments` +
                     `?page=${appointmentPage}` +
                     `&limit=20` +
+                    (isPatientActor
+                        ? `&patient_id=${encodeURIComponent(actor.patientId)}`
+                        : "") +
                     `&status=${encodeURIComponent(
                         appointmentStatus
                     )}` +
@@ -1036,7 +1111,7 @@ useEffect(() => {
                 setAppointmentTotalPages(data.totalPages);
             } catch (err) {
                 console.error(err);
-                setError("Failed to load appointments");
+                if (!cancelled) setListError("Could not load appointments. Check that the API is running.");
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -1052,7 +1127,11 @@ useEffect(() => {
         view,
         appointmentPage,
         appointmentStatus,
-        appointmentSearch
+        appointmentSearch,
+        reloadTick,
+        isPatientActor,
+        actor.patientId,
+        needsPatientPick
     ]);
 
     // =========================
@@ -1102,6 +1181,7 @@ useEffect(() => {
             try {
                 setBookingLoading(true);
                 setBookingError("");
+                setBookingLoadFailed(false);
 
                 const [
                     patientsResponse,
@@ -1134,14 +1214,15 @@ useEffect(() => {
                     await clinicsResponse.json();
 
                 setBookingPatients(
-                    patientsData.patients
+                    patientsData.patients || []
                 );
 
                 setBookingClinics(
-                    clinicsData.clinics
+                    clinicsData.clinics || []
                 );
             } catch (err) {
                 console.error(err);
+                setBookingLoadFailed(true);
                 setBookingError(
                     "Failed to load booking data"
                 );
@@ -1151,7 +1232,7 @@ useEffect(() => {
         };
 
         fetchBookingData();
-    }, [view]);
+    }, [view, reloadTick]);
 
     // =========================
     // FETCH AUDIT PATIENTS
@@ -1189,7 +1270,7 @@ useEffect(() => {
         };
 
         fetchAuditPatients();
-    }, [view]);
+    }, [view, reloadTick]);
 
 
     //new BLOCK 
@@ -1270,8 +1351,13 @@ useEffect(() => {
         appointmentId,
         newStatus
     ) => {
+        if (!canAdvanceStatus) {
+            setActionError("Patients cannot change appointment status.");
+            return;
+        }
+
         try {
-            setError("");
+            setActionError("");
 
             const response = await fetch(
                 `http://localhost:5000/api/appointments/${appointmentId}/status`,
@@ -1308,15 +1394,21 @@ useEffect(() => {
                 )}`
             );
 
+            if (!refreshResponse.ok) {
+                throw new Error(
+                    "Status was updated, but the list could not be refreshed. Try again."
+                );
+            }
+
             const refreshData =
                 await refreshResponse.json();
 
             setAppointments(
-                refreshData.appointments
+                refreshData.appointments || []
             );
 
             setAppointmentTotalPages(
-                refreshData.totalPages
+                refreshData.totalPages || 1
             );
 
             if (
@@ -1339,7 +1431,7 @@ useEffect(() => {
             }
         } catch (err) {
             console.error(err);
-            setError(err.message);
+            setActionError(err.message);
         }
     };
 
@@ -1347,12 +1439,17 @@ useEffect(() => {
     // BOOK APPOINTMENT
     // =========================
 
+    // A patient actor can only book for themself
+    const bookingPatient = isPatientActor
+        ? actor.patientId
+        : bookingPatientId;
+
     const handleBooking = async () => {
         try {
             setBookingError("");
             setBookingResult(null);
 
-            if (!bookingPatientId) {
+            if (!bookingPatient) {
                 setBookingError(
                     "Please select a patient"
                 );
@@ -1388,7 +1485,7 @@ useEffect(() => {
                     },
                     body: JSON.stringify({
                         patient_id:
-                            bookingPatientId,
+                            bookingPatient,
                         clinic_id:
                             bookingClinicId,
                         copay_amount:
@@ -1408,7 +1505,7 @@ useEffect(() => {
 
             setBookingResult(data);
 
-            setBookingPatientId("");
+            if (!isPatientActor) setBookingPatientId("");
             setBookingClinicId("");
             setBookingCopay("");
         } catch (err) {
@@ -1424,12 +1521,17 @@ useEffect(() => {
     // LOAD AUDIT TRAIL
     // =========================
 
+    // A patient actor can only see their own wallet history
+    const auditTarget = isPatientActor
+        ? actor.patientId
+        : auditPatientId;
+
     const loadAuditTrail = async () => {
         try {
             setAuditError("");
             setAuditLogs([]);
 
-            if (!auditPatientId) {
+            if (!auditTarget) {
                 setAuditError(
                     "Please select a patient"
                 );
@@ -1439,7 +1541,7 @@ useEffect(() => {
             setAuditLoading(true);
 
             let url =
-                `http://localhost:5000/api/audit-logs/${auditPatientId}`;
+                `http://localhost:5000/api/audit-logs/${auditTarget}`;
 
             const params = new URLSearchParams();
 
@@ -1560,8 +1662,14 @@ useEffect(() => {
                     On-Demand Telemedicine Platform
                 </p>
 
+                <ActorSwitcher
+                    actor={actor}
+                    onChange={handleActorChange}
+                />
+
                 <div className="navigation">
 
+                    {!isPatientActor && (
                     <button
                         className={
                             view === "patients"
@@ -1572,6 +1680,7 @@ useEffect(() => {
                     >
                         Patients
                     </button>
+                    )}
 
                     <button
                         className={
@@ -1617,12 +1726,14 @@ useEffect(() => {
                         Audit Trail
                     </button>
 
+                    {!isPatientActor && (
                     <button
                         className={`nav-button ${view === "analytics" ? "active" : ""}`}
                         onClick={() => setView("analytics")}
                     >
                         Analytics
                     </button>
+                    )}
 
                     <button
                         className={`nav-button ${view === "reviews" ? "active" : ""}`}
@@ -1692,11 +1803,15 @@ useEffect(() => {
 
                     </div>
 
-                    {!loading && patients.length === 0 ? (
-                        <div className="empty">
-                            No patients found.
-                        </div>
-                    ) : (
+                    {loading ? (
+<LoadingState label="Loading patients..." />
+) : listError ? (
+<ErrorState message={listError} onRetry={retry} />
+) : patients.length === 0 ? (
+<EmptyState>
+No patients found.
+</EmptyState>
+) : (
                         <table className="patient-table">
 
                             <thead>
@@ -1874,11 +1989,15 @@ useEffect(() => {
 
                     </div>
 
-                    {!loading && clinics.length === 0 ? (
-                        <div className="empty">
-                            No clinics found.
-                        </div>
-                    ) : (
+                    {loading ? (
+<LoadingState label="Loading clinics..." />
+) : listError ? (
+<ErrorState message={listError} onRetry={retry} />
+) : clinics.length === 0 ? (
+<EmptyState>
+No clinics found.
+</EmptyState>
+) : (
                         <table className="patient-table">
 
                             <thead>
@@ -2063,6 +2182,21 @@ useEffect(() => {
 
                     <h2>Appointments</h2>
 
+                    {isPatientActor && actor.patientId && (
+                        <p className="actor-scope">
+                            Showing only appointments for{" "}
+                            <strong>{actor.patientName || "the selected patient"}</strong>.
+                            Patients cannot change appointment status - switch to
+                            Clinic staff or Admin to move an appointment forward.
+                        </p>
+                    )}
+
+                    {actionError && (
+                        <div className="error" role="alert">
+                            {actionError}
+                        </div>
+                    )}
+
                     <div className="search-container">
 
                         <input
@@ -2123,11 +2257,19 @@ useEffect(() => {
 
                     </div>
 
-                    {!loading && appointments.length === 0 ? (
-                        <div className="empty">
-                            No appointments found.
-                        </div>
-                    ) : (
+                    {needsPatientPick ? (
+<EmptyState hint='Use the "Acting as" switcher above to choose a patient.'>
+Select a patient to see their appointments.
+</EmptyState>
+) : loading ? (
+<LoadingState label="Loading appointments..." />
+) : listError ? (
+<ErrorState message={listError} onRetry={retry} />
+) : appointments.length === 0 ? (
+<EmptyState hint={isPatientActor ? "Book one from the Book Appointment tab." : undefined}>
+No appointments found.
+</EmptyState>
+) : (
                         <table className="patient-table">
 
                             <thead>
@@ -2211,7 +2353,16 @@ useEffect(() => {
 
                                             <td>
 
-                                                {appointment.status ===
+                                                {appointment.status !==
+                                                    "DISCHARGED" &&
+                                                    !canAdvanceStatus && (
+                                                    <span className="muted">
+                                                        Staff only
+                                                    </span>
+                                                )}
+
+                                                {canAdvanceStatus &&
+                                                    appointment.status ===
                                                     "WAITING" && (
                                                     <button
                                                         className="btn-small"
@@ -2226,7 +2377,8 @@ useEffect(() => {
                                                     </button>
                                                 )}
 
-                                                {appointment.status ===
+                                                {canAdvanceStatus &&
+                                                    appointment.status ===
                                                     "IN_CONSULTATION" && (
                                                     <button
                                                         className="btn-small btn-success"
@@ -2392,16 +2544,37 @@ useEffect(() => {
                         the CareConnect booking procedure.
                     </p>
 
-                    {bookingError && (
-                        <div className="error">
+                    {bookingError && !bookingLoadFailed && (
+                        <div className="error" role="alert">
                             {bookingError}
                         </div>
                     )}
 
-                    {bookingLoading ? (
-                        <div className="empty">
-                            Loading...
-                        </div>
+                    <p className="actor-scope">
+                        Demo tip: a patient may only have one active
+                        (Waiting / In consultation) appointment. Book twice for
+                        the same patient to see the database's partial unique
+                        index reject the second booking, then discharge the first
+                        one from the Appointments tab and book again.
+                    </p>
+
+                    {needsPatientPick ? (
+                        <EmptyState hint='Use the "Acting as" switcher above to choose a patient.'>
+                            Select a patient to book on their behalf.
+                        </EmptyState>
+                    ) : bookingLoading ? (
+                        <LoadingState label="Loading patients and clinics..." />
+                    ) : bookingLoadFailed ? (
+                        <ErrorState
+                            message="Could not load patients and clinics for booking."
+                            onRetry={retry}
+                        />
+                    ) : bookingClinics.length === 0 || bookingPatients.length === 0 ? (
+                        <EmptyState>
+                            {bookingClinics.length === 0
+                                ? "No clinics are available to book."
+                                : "No patients exist yet."}
+                        </EmptyState>
                     ) : (
                         <>
 
@@ -2422,8 +2595,9 @@ useEffect(() => {
                                 <select
                                     className="search-input"
                                     value={
-                                        bookingPatientId
+                                        bookingPatient
                                     }
+                                    disabled={isPatientActor}
                                     onChange={(e) =>
                                         setBookingPatientId(
                                             e.target.value
@@ -2765,16 +2939,23 @@ useEffect(() => {
                     </p>
 
                     {auditError && (
-                        <div className="error">
-                            {auditError}
-                        </div>
+                        <ErrorState
+                            message={auditError}
+                            onRetry={
+                                auditPatients.length === 0
+                                    ? retry
+                                    : undefined
+                            }
+                        />
                     )}
 
-                    {auditLoading &&
+                    {needsPatientPick ? (
+                        <EmptyState hint='Use the "Acting as" switcher above to choose a patient.'>
+                            Select a patient to see their wallet audit trail.
+                        </EmptyState>
+                    ) : auditLoading &&
                     auditPatients.length === 0 ? (
-                        <div className="empty">
-                            Loading patients...
-                        </div>
+                        <LoadingState label="Loading patients..." />
                     ) : (
                         <>
                             {/* PATIENT */}
@@ -2797,8 +2978,11 @@ useEffect(() => {
                                 <select
                                     className="search-input"
                                     value={
-                                        auditPatientId
+                                        isPatientActor
+                                            ? actor.patientId
+                                            : auditPatientId
                                     }
+                                    disabled={isPatientActor}
                                     onChange={(e) =>
                                         setAuditPatientId(
                                             e.target.value
@@ -3034,7 +3218,7 @@ useEffect(() => {
                     {/* NO RESULTS */}
 
                     {!auditLoading &&
-                        auditPatientId &&
+                        auditTarget &&
                         auditLogs.length === 0 && (
                             <div
                                 className="empty"
@@ -3065,15 +3249,11 @@ useEffect(() => {
         {/* ================================================= */}
 
         {analyticsError && (
-            <div className="error">
-                {analyticsError}
-            </div>
+            <ErrorState message={analyticsError} onRetry={retry} />
         )}
 
         {analyticsLoading && (
-            <div className="empty">
-                Loading analytics...
-            </div>
+            <LoadingState label="Loading analytics..." />
         )}
 
         {!analyticsLoading &&
@@ -3274,15 +3454,11 @@ useEffect(() => {
             </div>
 
             {dischargeError && (
-                <div className="error">
-                    {dischargeError}
-                </div>
+                <ErrorState message={dischargeError} onRetry={retry} />
             )}
 
             {dischargeLoading && dischargeData.length === 0 && (
-                <div className="empty">
-                    Loading discharge summary...
-                </div>
+                <LoadingState label="Loading discharge summary..." />
             )}
 
             {!dischargeLoading &&
@@ -3422,11 +3598,11 @@ useEffect(() => {
         {/* ================================================= */}
 
         {reviewsError && (
-            <div className="error">{reviewsError}</div>
+            <ErrorState message={reviewsError} onRetry={retry} />
         )}
 
         {reviewsLoading && !reviewData && (
-            <div className="empty">Loading reviews...</div>
+            <LoadingState label="Loading reviews..." />
         )}
 
         {!reviewsLoading && !reviewsError && !reviewData && (
@@ -3587,11 +3763,11 @@ useEffect(() => {
                     </div>
 
                     {catalogsError && (
-                        <div className="error">{catalogsError}</div>
+                        <ErrorState message={catalogsError} onRetry={retry} />
                     )}
 
                     {reviewsLoading && catalogData.length === 0 && (
-                        <div className="empty">Loading catalogs...</div>
+                        <LoadingState label="Loading catalogs..." />
                     )}
 
                     {!reviewsLoading &&
@@ -3748,9 +3924,11 @@ useEffect(() => {
         </div>
 
 
-        {mapLoading && <p>Loading nearby nurses...</p>}
+        {mapLoading && nurseData.length === 0 && (
+            <LoadingState label="Loading nearby nurses..." />
+        )}
 
-        {mapError && <div className="error">{mapError}</div>}
+        {mapError && <ErrorState message={mapError} onRetry={retry} />}
 
         {!mapError && (
             <>
