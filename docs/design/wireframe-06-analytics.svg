@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1000" viewBox="0 0 1440 1000">
+<rect x="0" y="0" width="1440" height="1000" rx="0" fill="#f7f8fa" stroke="#f7f8fa" stroke-width="0"/>
+<rect x="24" y="20" width="1392" height="135" rx="12" fill="#fff" stroke="#c8cdd2" stroke-width="2"/>
+<text x="52" y="62" font-family="Arial, sans-serif" font-size="30" font-weight="700" fill="#222">CareConnect</text>
+<text x="52" y="91" font-family="Arial, sans-serif" font-size="16" font-weight="400" fill="#555">On-Demand Telemedicine Platform</text>
+<rect x="50" y="108" width="112" height="34" rx="5" fill="#f4f4f4" stroke="#89949a" stroke-width="1.2"/>
+<text x="60" y="130" font-family="Arial, sans-serif" font-size="14" font-weight="400" fill="#222">Patients</text>
+<rect x="171" y="108" width="112" height="34" rx="5" fill="#f4f4f4" stroke="#89949a" stroke-width="1.2"/>
+<text x="181" y="130" font-family="Arial, sans-serif" font-size="14" font-weight="400" fill="#222">Clinics</text>
+<rect x="292" y="108" width="145" height="34" rx="5" fill="#f4f4f4" stroke="#89949a" stroke-width="1.2"/>
+<text x="302" y="130" font-family="Arial, sans-serif" font-size="14" font-weight="400" fill="#222">Appointments</text>
+<rect x="446" y="108" width="180" height="34" rx="5" fill="#f4f4f4" stroke="#89949a" stroke-width="1.2"/>
+<text x="456" y="130" font-family="Arial, sans-serif" font-size="14" font-weight="400" fill="#222">Book Appointment</text>
+<rect x="635" y="108" width="130" height="34" rx="5" fill="#f4f4f4" stroke="#89949a" stroke-width="1.2"/>
+<text x="645" y="130" font-family="Arial, sans-serif" font-size="14" font-weight="400" fill="#222">Audit Trail</text>
+<rect x="774" y="108" width="112" height="34" rx="5" fill="#dce8ed" stroke="#89949a" stroke-width="1.2"/>
+<text x="784" y="130" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#222">Analytics</text>
+<rect x="895" y="108" width="112" height="34" rx="5" fill="#f4f4f4" stroke="#89949a" stroke-width="1.2"/>
+<text x="905" y="130" font-family="Arial, sans-serif" font-size="14" font-weight="400" fill="#222">Reviews</text>
+<rect x="1016" y="108" width="112" height="34" rx="5" fill="#f4f4f4" stroke="#89949a" stroke-width="1.2"/>
+<text x="1026" y="130" font-family="Arial, sans-serif" font-size="14" font-weight="400" fill="#222">Map</text>
+<rect x="24" y="176" width="1392" height="800" rx="12" fill="#fff" stroke="#c8cdd2" stroke-width="2"/>
+<text x="54" y="220" font-family="Arial, sans-serif" font-size="27" font-weight="700" fill="#222">Clinic Revenue Analytics</text>
+<line x1="54" y1="240" x2="1386" y2="240" stroke="#d3d7da" stroke-width="1"/>
+<text x="55" y="275" font-family="Arial, sans-serif" font-size="15" font-weight="400" fill="#555">Revenue trends and monthly discharge summary from analytics queries / materialized view.</text>
+<rect x="55" y="295" width="1325" height="110" rx="9" fill="#fafafa" stroke="#aab2b7" stroke-width="1"/>
+<text x="80" y="330" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#222">Monthly Discharge Summary</text>
+<text x="80" y="365" font-family="Arial, sans-serif" font-size="16" font-weight="400" fill="#222">Total discharges: —     Total revenue: —     Clinics ranked: —</text>
+<text x="900" y="365" font-family="Arial, sans-serif" font-size="15" font-weight="400" fill="#555">Last refreshed: —</text>
+<rect x="1160" y="315" width="190" height="42" rx="6" fill="#f1f1f1" stroke="#555" stroke-width="1.5"/><text x="1174" y="342" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#222">Refresh data</text>
+<text x="55" y="455" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#222">7-day average revenue by clinic</text>
+<rect x="55" y="475" width="850" height="300" rx="8" fill="#fff" stroke="#aab2b7" stroke-width="1"/>
+<line x1="105" y1="720" x2="870" y2="720" stroke="#555" stroke-width="2"/>
+<line x1="105" y1="510" x2="105" y2="720" stroke="#555" stroke-width="2"/>
+<line x1="105" y1="700" x2="870" y2="700" stroke="#e0e3e5" stroke-width="1"/>
+<text x="65" y="705" font-family="Arial, sans-serif" font-size="12" font-weight="400" fill="#666">$0</text>
+<line x1="105" y1="657" x2="870" y2="657" stroke="#e0e3e5" stroke-width="1"/>
+<text x="65" y="662" font-family="Arial, sans-serif" font-size="12" font-weight="400" fill="#666">$250</text>
+<line x1="105" y1="614" x2="870" y2="614" stroke="#e0e3e5" stroke-width="1"/>
+<text x="65" y="619" font-family="Arial, sans-serif" font-size="12" font-weight="400" fill="#666">$500</text>
+<line x1="105" y1="571" x2="870" y2="571" stroke="#e0e3e5" stroke-width="1"/>
+<text x="65" y="576" font-family="Arial, sans-serif" font-size="12" font-weight="400" fill="#666">$750</text>
+<line x1="105" y1="528" x2="870" y2="528" stroke="#e0e3e5" stroke-width="1"/>
+<text x="65" y="533" font-family="Arial, sans-serif" font-size="12" font-weight="400" fill="#666">$1000</text>
+<polyline points="145,665 230,625 315,650 400,575 485,595 570,535 655,560 740,520 825,545" fill="none" stroke="#637d8b" stroke-width="4"/>
+<circle cx="145" cy="665" r="5" fill="#637d8b"/>
+<circle cx="230" cy="625" r="5" fill="#637d8b"/>
+<circle cx="315" cy="650" r="5" fill="#637d8b"/>
+<circle cx="400" cy="575" r="5" fill="#637d8b"/>
+<circle cx="485" cy="595" r="5" fill="#637d8b"/>
+<circle cx="570" cy="535" r="5" fill="#637d8b"/>
+<circle cx="655" cy="560" r="5" fill="#637d8b"/>
+<circle cx="740" cy="520" r="5" fill="#637d8b"/>
+<circle cx="825" cy="545" r="5" fill="#637d8b"/>
+<text x="110" y="750" font-family="Arial, sans-serif" font-size="12" font-weight="400" fill="#222">7 days ago</text>
+<text x="780" y="750" font-family="Arial, sans-serif" font-size="12" font-weight="400" fill="#222">Today</text>
+<text x="940" y="455" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#222">Ranked clinics</text>
+<rect x="940" y="475" width="440" height="42" rx="3" fill="#e9eef1" stroke="#a5adb2" stroke-width="1"/>
+<text x="950.0" y="501" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#222">Rank</text>
+<text x="1096.6666666666667" y="501" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#222">Clinic</text>
+<text x="1243.3333333333333" y="501" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#222">7-day avg</text>
+<rect x="940" y="517" width="440" height="50" rx="0" fill="#fff" stroke="#c4c9cc" stroke-width="1"/>
+<text x="950.0" y="546" font-family="Arial, sans-serif" font-size="14" font-weight="400" fill="#333">1</text>
+<text x="1096.6666666666667" y="546" font-family="Arial, sans-serif" font-size="14" font-weight="400" fill="#333">City Care</text>
+<text x="1243.3333333333333" y="546" font-family="Arial, sans-serif" font-size="14" font-weight="400" fill="#333">$ 820</text>
+<rect x="940" y="567" width="440" height="50" rx="0" fill="#fafafa" stroke="#c4c9cc" stroke-width="1"/>
+<text x="950.0" y="596" font-family="Arial, sans-serif" font-size="14" font-weight="400" fill="#333">2</text>
+<text x="1096.6666666666667" y="596" font-family="Arial, sans-serif" font-size="14" font-weight="400" fill="#333">Green Cross</text>
+<text x="1243.3333333333333" y="596" font-family="Arial, sans-serif" font-size="14" font-weight="400" fill="#333">$ 760</text>
+<rect x="940" y="617" width="440" height="50" rx="0" fill="#fff" stroke="#c4c9cc" stroke-width="1"/>
+<text x="950.0" y="646" font-family="Arial, sans-serif" font-size="14" font-weight="400" fill="#333">3</text>
+<text x="1096.6666666666667" y="646" font-family="Arial, sans-serif" font-size="14" font-weight="400" fill="#333">Community</text>
+<text x="1243.3333333333333" y="646" font-family="Arial, sans-serif" font-size="14" font-weight="400" fill="#333">$ 640</text>
+<rect x="940" y="667" width="440" height="50" rx="0" fill="#fafafa" stroke="#c4c9cc" stroke-width="1"/>
+<text x="950.0" y="696" font-family="Arial, sans-serif" font-size="14" font-weight="400" fill="#333">4</text>
+<text x="1096.6666666666667" y="696" font-family="Arial, sans-serif" font-size="14" font-weight="400" fill="#333">Sunrise</text>
+<text x="1243.3333333333333" y="696" font-family="Arial, sans-serif" font-size="14" font-weight="400" fill="#333">$ 510</text>
+<text x="55" y="830" font-family="Arial, sans-serif" font-size="14" font-weight="400" fill="#666">Loading, no-data and refresh-error messages should appear here when applicable.</text>
+</svg>

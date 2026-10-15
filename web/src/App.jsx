@@ -263,6 +263,229 @@ function MovingAverageChart({ rows, selectedClinicId }) {
     );
 }
 
+// =========================
+// REVIEWS HELPERS
+// =========================
+
+// "wait_time_long" / "waitTimeLong" -> "Wait time long"
+const humanize = (key) => {
+    const text = String(key)
+        .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+        .replace(/[_-]+/g, " ")
+        .trim()
+        .toLowerCase();
+    return text.charAt(0).toUpperCase() + text.slice(1);
+};
+
+// Horizontal bar chart in plain HTML/CSS.
+// rows: [{ key, label, value }]
+function BarChart({ rows, color = "var(--primary)", valueSuffix = "" }) {
+    const max = Math.max(1, ...rows.map((r) => r.value));
+    const total = rows.reduce((sum, r) => sum + r.value, 0);
+
+    return (
+        <div className="bar-chart" role="list">
+            {rows.map((row) => (
+                <div className="bar-row" role="listitem" key={row.key}>
+                    <span className="bar-label">{row.label}</span>
+                    <span className="bar-track">
+                        <span
+                            className="bar-fill"
+                            style={{
+                                width: `${(row.value / max) * 100}%`,
+                                background: color
+                            }}
+                            title={`${row.label}: ${row.value}${valueSuffix}`}
+                        />
+                    </span>
+                    <span className="bar-value">
+                        {row.value.toLocaleString()}
+                        {total > 0 && (
+                            <span className="muted">
+                                {" "}
+                                ({Math.round((row.value / total) * 100)}%)
+                            </span>
+                        )}
+                    </span>
+                </div>
+            ))}
+        </div>
+    );
+}
+
+// Rating facet -> always 5★ down to 1★, missing ratings shown as 0.
+// Falls back to numeric order if the ids aren't plain 1–5 ratings
+// (e.g. $bucket boundaries).
+const buildRatingRows = (buckets = []) => {
+    const isStarScale = buckets.every((b) => {
+        const n = Number(b._id);
+        return Number.isInteger(n) && n >= 1 && n <= 5;
+    });
+
+    if (isStarScale) {
+        const counts = new Map(
+            buckets.map((b) => [Number(b._id), Number(b.count) || 0])
+        );
+        return [5, 4, 3, 2, 1].map((star) => ({
+            key: star,
+            label: `${star} ★`,
+            value: counts.get(star) ?? 0
+        }));
+    }
+
+    return [...buckets]
+        .sort((a, b) => Number(b._id) - Number(a._id))
+        .map((b) => ({
+            key: String(b._id),
+            label: `${b._id}`,
+            value: Number(b.count) || 0
+        }));
+};
+
+function StarDisplay({ rating }) {
+    const clamped = Math.max(0, Math.min(5, Number(rating) || 0));
+    return (
+        <span
+            className="star-display"
+            aria-label={`${clamped.toFixed(1)} out of 5 stars`}
+        >
+            <span className="star-base">★★★★★</span>
+            <span
+                className="star-fill"
+                style={{ width: `${(clamped / 5) * 100}%` }}
+            >
+                ★★★★★
+            </span>
+        </span>
+    );
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}(T[\d:.]+(Z|[+-]\d{2}:?\d{2})?)?$/;
+
+// Renders any catalog value readably: primitives as text,
+// lists of primitives as chips, objects as labelled rows,
+// lists of objects as small nested cards.
+function CatalogValue({ value }) {
+    if (value === null || value === undefined || value === "") {
+        return <span className="muted">—</span>;
+    }
+
+    if (typeof value === "boolean") {
+        return <YesNoBadge value={value} />;
+    }
+
+    if (typeof value === "number") {
+        return <span>{value.toLocaleString()}</span>;
+    }
+
+    if (typeof value === "string") {
+        if (ISO_DATE.test(value) && !Number.isNaN(Date.parse(value))) {
+            return <span>{new Date(value).toLocaleString()}</span>;
+        }
+        return <span>{value}</span>;
+    }
+
+    if (Array.isArray(value)) {
+        if (value.length === 0) {
+            return <span className="muted">None</span>;
+        }
+
+        const allPrimitive = value.every(
+            (v) => v === null || typeof v !== "object"
+        );
+
+        if (allPrimitive) {
+            return (
+                <span className="chip-list">
+                    {value.map((v, i) => (
+                        <span className="chip" key={i}>
+                            {String(v)}
+                        </span>
+                    ))}
+                </span>
+            );
+        }
+
+        return (
+            <div className="catalog-nested-list">
+                {value.map((v, i) => (
+                    <div className="catalog-nested" key={i}>
+                        <CatalogValue value={v} />
+                    </div>
+                ))}
+            </div>
+        );
+    }
+
+    if (typeof value === "object") {
+        // MongoDB extended JSON like { $oid } or { $date }
+        if (value.$oid) return <span>{value.$oid}</span>;
+        if (value.$date) return <CatalogValue value={value.$date} />;
+
+        const entries = Object.entries(value);
+        if (entries.length === 0) {
+            return <span className="muted">—</span>;
+        }
+
+        return (
+            <dl className="catalog-fields">
+                {entries.map(([k, v]) => (
+                    <div className="catalog-field" key={k}>
+                        <dt>{humanize(k)}</dt>
+                        <dd>
+                            <CatalogValue value={v} />
+                        </dd>
+                    </div>
+                ))}
+            </dl>
+        );
+    }
+
+    return <span>{String(value)}</span>;
+}
+
+const CATALOG_HIDDEN_KEYS = new Set(["_id", "__v", "clinic_id", "type"]);
+const CATALOG_TITLE_KEYS = ["name", "title", "catalog_name", "service_name"];
+
+function CatalogCard({ doc }) {
+    const titleKey = CATALOG_TITLE_KEYS.find(
+        (k) => typeof doc[k] === "string" && doc[k]
+    );
+
+    const fields = Object.entries(doc).filter(
+        ([k]) => !CATALOG_HIDDEN_KEYS.has(k) && k !== titleKey
+    );
+
+    return (
+        <article className="catalog-card">
+            <header className="catalog-card-header">
+                <div>
+                    <h4>{titleKey ? doc[titleKey] : humanize(doc.type ?? "Catalog")}</h4>
+                    <span className="muted">Clinic ID: {doc.clinic_id ?? "—"}</span>
+                </div>
+                {doc.type && (
+                    <span className="chip chip-type">{humanize(doc.type)}</span>
+                )}
+            </header>
+
+            {fields.length > 0 ? (
+                <dl className="catalog-fields">
+                    {fields.map(([k, v]) => (
+                        <div className="catalog-field" key={k}>
+                            <dt>{humanize(k)}</dt>
+                            <dd>
+                                <CatalogValue value={v} />
+                            </dd>
+                        </div>
+                    ))}
+                </dl>
+            ) : (
+                <p className="muted">No additional fields.</p>
+            )}
+        </article>
+    );
+}
+
 function App() {
 
 const refreshDischargeAnalytics = async () => {
@@ -422,6 +645,9 @@ const refreshDischargeAnalytics = async () => {
     const [catalogData, setCatalogData] = useState([]);
     const [reviewsLoading, setReviewsLoading] = useState(false);
     const [reviewsError, setReviewsError] = useState("");
+    const [catalogsError, setCatalogsError] = useState("");
+    const [catalogTypeFilter, setCatalogTypeFilter] = useState("");
+    const [showAllCatalogs, setShowAllCatalogs] = useState(false);
 
     const [nurseData, setNurseData] = useState([]);
     const [mapLatitude, setMapLatitude] = useState("13.0827");
@@ -560,42 +786,51 @@ useEffect(() => {
 
     let cancelled = false;
 
+    // Review analytics ($facet) and catalogs load independently,
+    // so one failing doesn't hide the other.
+    const loadJson = async (url, message) => {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(message);
+        return response.json();
+    };
+
     const fetchReviews = async () => {
-        try {
-            setReviewsLoading(true);
-            setReviewsError("");
+        setReviewsLoading(true);
+        setReviewsError("");
+        setCatalogsError("");
 
-            const [analyticsResponse, catalogsResponse] =
-                await Promise.all([
-                    fetch("http://localhost:5000/api/reviews/analytics"),
-                    fetch("http://localhost:5000/api/reviews/catalogs")
-                ]);
+        const [analyticsResult, catalogsResult] = await Promise.allSettled([
+            loadJson(
+                "http://localhost:5000/api/reviews/analytics",
+                "Failed to fetch review analytics"
+            ),
+            loadJson(
+                "http://localhost:5000/api/reviews/catalogs",
+                "Failed to fetch medical catalogs"
+            )
+        ]);
 
-            if (!analyticsResponse.ok) {
-                throw new Error("Failed to fetch review analytics");
-            }
+        if (cancelled) return;
 
-            if (!catalogsResponse.ok) {
-                throw new Error("Failed to fetch medical catalogs");
-            }
-
-            const analytics = await analyticsResponse.json();
-            const catalogs = await catalogsResponse.json();
-
-            if (!cancelled) {
-                setReviewData(analytics);
-                setCatalogData(catalogs.catalogs || []);
-            }
-        } catch (err) {
-            if (!cancelled) {
-                console.error("Reviews loading error:", err);
-                setReviewsError(err.message || "Failed to load reviews");
-            }
-        } finally {
-            if (!cancelled) {
-                setReviewsLoading(false);
-            }
+        if (analyticsResult.status === "fulfilled") {
+            setReviewData(analyticsResult.value);
+        } else {
+            console.error("Review analytics error:", analyticsResult.reason);
+            setReviewsError(
+                analyticsResult.reason?.message || "Failed to load reviews"
+            );
         }
+
+        if (catalogsResult.status === "fulfilled") {
+            setCatalogData(catalogsResult.value.catalogs || []);
+        } else {
+            console.error("Catalogs error:", catalogsResult.reason);
+            setCatalogsError(
+                catalogsResult.reason?.message || "Failed to load medical catalogs"
+            );
+        }
+
+        setReviewsLoading(false);
     };
 
     fetchReviews();
@@ -3176,124 +3411,224 @@ useEffect(() => {
 {view === "reviews" && (
     <div className="section">
         <h2>Patient Reviews</h2>
+        <p>
+            Review statistics from a single MongoDB $facet pipeline
+            (overall average, rating distribution, top tags), plus
+            the flexible MedicalCatalogs documents.
+        </p>
 
-        {reviewsLoading && (
-            <div className="empty">Loading reviews...</div>
-        )}
+        {/* ================================================= */}
+        {/* $FACET CHARTS                                     */}
+        {/* ================================================= */}
 
         {reviewsError && (
             <div className="error">{reviewsError}</div>
         )}
 
-        {!reviewsLoading && !reviewsError && reviewData && (
-            <>
+        {reviewsLoading && !reviewData && (
+            <div className="empty">Loading reviews...</div>
+        )}
+
+        {!reviewsLoading && !reviewsError && !reviewData && (
+            <div className="empty">No review data available.</div>
+        )}
+
+        {reviewData && !reviewsError && (() => {
+            const overall = reviewData.global_average?.[0] ?? {};
+            const avgRating = Number(overall.avg_rating);
+            const hasAvg = Number.isFinite(avgRating);
+            const totalReviews = Number(overall.total_reviews) || 0;
+
+            const ratingRows = buildRatingRows(reviewData.rating_buckets);
+
+            const tagRows = [...(reviewData.top_sentiment_tags ?? [])]
+                .sort((a, b) => Number(b.count) - Number(a.count))
+                .map((tag) => ({
+                    key: String(tag._id),
+                    label: humanize(tag._id ?? "Untagged"),
+                    value: Number(tag.count) || 0
+                }));
+
+            return (
+                <>
+                    {/* Overall average rating */}
+                    <div className="stat-grid">
+                        <div className="stat-tile">
+                            <span className="stat-label">
+                                Overall average rating
+                            </span>
+                            <span className="stat-value">
+                                {hasAvg ? avgRating.toFixed(2) : "N/A"}
+                                <span className="stat-unit"> / 5</span>
+                            </span>
+                            {hasAvg && <StarDisplay rating={avgRating} />}
+                        </div>
+
+                        <div className="stat-tile">
+                            <span className="stat-label">
+                                Total reviews
+                            </span>
+                            <span className="stat-value">
+                                {totalReviews.toLocaleString()}
+                            </span>
+                        </div>
+
+                        <div className="stat-tile">
+                            <span className="stat-label">
+                                Most common tag
+                            </span>
+                            <span className="stat-value stat-value-text">
+                                {tagRows[0]?.label ?? "—"}
+                            </span>
+                            {tagRows[0] && (
+                                <span className="muted">
+                                    {tagRows[0].value} mentions
+                                </span>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="review-charts">
+                        {/* Rating distribution */}
+                        <div className="chart-card">
+                            <div className="analytics-header">
+                                <div>
+                                    <h3>Rating Distribution</h3>
+                                    <p>Number of reviews at each star rating.</p>
+                                </div>
+                            </div>
+
+                            {ratingRows.some((r) => r.value > 0) ? (
+                                <BarChart
+                                    rows={ratingRows}
+                                    color="#d97706"
+                                    valueSuffix=" reviews"
+                                />
+                            ) : (
+                                <div className="empty">No ratings available.</div>
+                            )}
+                        </div>
+
+                        {/* Top tags */}
+                        <div className="chart-card">
+                            <div className="analytics-header">
+                                <div>
+                                    <h3>Top Review Tags</h3>
+                                    <p>Most frequent sentiment tags across reviews.</p>
+                                </div>
+                            </div>
+
+                            {tagRows.length > 0 ? (
+                                <BarChart
+                                    rows={tagRows}
+                                    color="#0e7490"
+                                    valueSuffix=" mentions"
+                                />
+                            ) : (
+                                <div className="empty">No review tags available.</div>
+                            )}
+                        </div>
+                    </div>
+                </>
+            );
+        })()}
+
+        {/* ================================================= */}
+        {/* FLEXIBLE CATALOG DOCUMENTS                        */}
+        {/* ================================================= */}
+
+        {(() => {
+            const catalogTypes = [
+                ...new Set(catalogData.map((d) => d.type).filter(Boolean))
+            ].sort();
+
+            const filtered = catalogTypeFilter
+                ? catalogData.filter((d) => d.type === catalogTypeFilter)
+                : catalogData;
+
+            const PREVIEW_COUNT = 6;
+            const visible = showAllCatalogs
+                ? filtered
+                : filtered.slice(0, PREVIEW_COUNT);
+
+            return (
                 <div className="analytics-summary">
-                    <h3>Overall Rating</h3>
-                    <p>
-                        Average rating:{" "}
-                        <strong>
-                            {reviewData.global_average?.[0]?.avg_rating ?? "N/A"}
-                            {" / 5"}
-                        </strong>
-                    </p>
-                    <p>
-                        Total reviews:{" "}
-                        <strong>
-                            {reviewData.global_average?.[0]?.total_reviews ?? 0}
-                        </strong>
-                    </p>
+                    <div className="analytics-header">
+                        <div>
+                            <h3>Medical Catalogs</h3>
+                            <p>
+                                Flexible-schema documents. Each one can
+                                carry different fields, so every field is
+                                shown with a readable label.
+                            </p>
+                        </div>
+
+                        {catalogTypes.length > 1 && (
+                            <label className="chart-filter">
+                                Type
+                                <select
+                                    value={catalogTypeFilter}
+                                    onChange={(e) => {
+                                        setCatalogTypeFilter(e.target.value);
+                                        setShowAllCatalogs(false);
+                                    }}
+                                >
+                                    <option value="">
+                                        All types ({catalogData.length})
+                                    </option>
+                                    {catalogTypes.map((t) => (
+                                        <option key={t} value={t}>
+                                            {humanize(t)}
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+                        )}
+                    </div>
+
+                    {catalogsError && (
+                        <div className="error">{catalogsError}</div>
+                    )}
+
+                    {reviewsLoading && catalogData.length === 0 && (
+                        <div className="empty">Loading catalogs...</div>
+                    )}
+
+                    {!reviewsLoading &&
+                        !catalogsError &&
+                        filtered.length === 0 && (
+                            <div className="empty">
+                                No medical catalog documents found.
+                            </div>
+                        )}
+
+                    {visible.length > 0 && (
+                        <div className="catalog-grid">
+                            {visible.map((doc, i) => (
+                                <CatalogCard
+                                    key={doc._id?.$oid ?? doc._id ?? i}
+                                    doc={doc}
+                                />
+                            ))}
+                        </div>
+                    )}
+
+                    {filtered.length > PREVIEW_COUNT && (
+                        <div className="pagination">
+                            <button
+                                onClick={() =>
+                                    setShowAllCatalogs((v) => !v)
+                                }
+                            >
+                                {showAllCatalogs
+                                    ? "Show fewer"
+                                    : `Show all ${filtered.length} documents`}
+                            </button>
+                        </div>
+                    )}
                 </div>
-
-                <h3>Rating Distribution</h3>
-
-                {reviewData.rating_buckets?.length > 0 ? (
-                    <table className="patient-table">
-                        <thead>
-                            <tr>
-                                <th>Rating</th>
-                                <th>Number of Reviews</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {reviewData.rating_buckets.map((item) => (
-                                <tr key={item._id}>
-                                    <td>{item._id} / 5</td>
-                                    <td>{item.count}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                ) : (
-                    <div className="empty">No ratings available.</div>
-                )}
-
-                <h3>Top Review Tags</h3>
-
-                {reviewData.top_sentiment_tags?.length > 0 ? (
-                    <table className="patient-table">
-                        <thead>
-                            <tr>
-                                <th>Tag</th>
-                                <th>Count</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {reviewData.top_sentiment_tags.map((item) => (
-                                <tr key={item._id}>
-                                    <td>{item._id.replaceAll("_", " ")}</td>
-                                    <td>{item.count}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                ) : (
-                    <div className="empty">No review tags available.</div>
-                )}
-            </>
-        )}
-
-        <h3>Medical Catalogs</h3>
-
-        {!reviewsLoading && !reviewsError && catalogData.length === 0 ? (
-            <div className="empty">No medical catalog documents found.</div>
-        ) : (
-            <div className="analytics-table-container">
-                <table className="patient-table">
-                    <thead>
-                        <tr>
-                            <th>Clinic ID</th>
-                            <th>Type</th>
-                            <th>Document Details</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {catalogData.map((item) => (
-                            <tr key={item._id}>
-                                <td>{item.clinic_id}</td>
-                                <td>{item.type}</td>
-                                <td>
-                                    <pre style={{
-                                        whiteSpace: "pre-wrap",
-                                        overflowWrap: "anywhere",
-                                        margin: 0
-                                    }}>
-                                        {JSON.stringify(
-                                            Object.fromEntries(
-                                                Object.entries(item).filter(
-                                                    ([key]) => key !== "_id"
-                                                )
-                                            ),
-                                            null,
-                                            2
-                                        )}
-                                    </pre>
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
-        )}
+            );
+        })()}
     </div>
 )}
 
