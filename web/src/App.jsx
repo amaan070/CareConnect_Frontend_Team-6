@@ -2900,14 +2900,6 @@ No appointments found.
                         </div>
                     )}
 
-                    <p className="actor-scope">
-                        Demo tip: a patient may only have one active
-                        (Waiting / In consultation) appointment. Book twice for
-                        the same patient to see the database's partial unique
-                        index reject the second booking, then discharge the first
-                        one from the Appointments tab and book again.
-                    </p>
-
                     {needsPatientPick ? (
                         <EmptyState hint='Use the "Acting as" switcher above to choose a patient.'>
                             Select a patient to book on their behalf.
@@ -3599,11 +3591,6 @@ No appointments found.
 {view === "analytics" && (
     <div className="section">
         <h2>Clinic Revenue Analytics</h2>
-        <p>
-            Revenue trends from the window-function query, clinic
-            rankings from DENSE_RANK(), and discharge totals from the
-            materialized view.
-        </p>
 
         {/* ================================================= */}
         {/* 1. 7-DAY MOVING AVERAGE CHART (window function)   */}
@@ -3948,11 +3935,6 @@ No appointments found.
 {view === "reviews" && (
     <div className="section">
         <h2>Patient Reviews</h2>
-        <p>
-            Review statistics from a single MongoDB $facet pipeline
-            (overall average, rating distribution, top tags), plus
-            the flexible MedicalCatalogs documents.
-        </p>
 
         {/* ================================================= */}
         {/* $FACET CHARTS                                     */}
@@ -4205,11 +4187,6 @@ No appointments found.
         <p>
             Search radius: <strong>5 km</strong>
             {" · "}Auto-refresh: <strong>10 seconds</strong>
-        </p>
-
-        <p className="warning">
-            Nurse locations are based on stored pings. Check each last-ping
-            timestamp before treating a location as current.
         </p>
 
         <div style={{ margin: "20px 0" }}>

@@ -1154,6 +1154,129 @@ button:focus-visible {
     font-size: 13.5px;
 }
 
+/* ---- Fixed-size switcher: one row for every role, so the header never jumps ---- */
+
+/* keep floating lists above the page content below the header */
+.header {
+    position: relative;
+    z-index: 10;
+}
+
+.actor-bar {
+    box-sizing: border-box;
+    min-height: 58px;
+}
+
+.actor-field select,
+.actor-field input {
+    box-sizing: border-box;
+    height: 34px;
+    padding: 0 10px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 500;
+}
+
+.actor-field select {
+    min-width: 150px;
+    max-width: 240px;
+    text-overflow: ellipsis;
+}
+
+.actor-field input {
+    width: 240px;
+}
+
+.actor-field input:disabled {
+    background: #e4ebee;
+    color: var(--ink-faint);
+}
+
+/* the chosen patient: name + Change link on one line */
+.actor-selected {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 34px;
+    color: #fff;
+}
+
+.actor-selected strong {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+}
+
+/* patient search: results float over the page instead of growing the header */
+.actor-search {
+    position: relative;
+}
+
+.actor-results {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 50;
+    width: 300px;
+    max-height: 260px;
+    margin: 0;
+    padding: 4px 0;
+    overflow-y: auto;
+    list-style: none;
+    background: var(--surface);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 10px 28px rgba(11, 46, 58, 0.28);
+    color: var(--ink);
+    font-weight: 500;
+}
+
+.actor-results button {
+    display: block;
+    width: 100%;
+    padding: 8px 12px;
+    background: transparent;
+    color: var(--ink);
+    border: none;
+    border-radius: 0;
+    font-size: 13.5px;
+    font-weight: 500;
+    text-align: left;
+}
+
+.actor-results button:hover,
+.actor-results button:focus-visible {
+    background: var(--surface-sunken);
+    outline: none;
+}
+
+.actor-results-note {
+    padding: 8px 12px;
+    color: var(--ink-muted);
+    font-size: 12.5px;
+    font-weight: 400;
+}
+
+.actor-note {
+    white-space: nowrap;
+}
+
+/* wide screens: same box size and same position for every role */
+@media (min-width: 1101px) {
+    .actor-bar {
+        flex-wrap: nowrap;
+        justify-content: flex-start;
+        width: 640px;
+        max-width: none;
+    }
+}
+
 @media (max-width: 900px) {
     .header {
         grid-template-columns: minmax(0, 1fr);

@@ -52,6 +52,9 @@ const fetchAll = async (resource) => {
 //                  manages that clinic's data
 //  - Patient: sees only their own appointments + wallet audit, books for
 //             themself, cannot change appointment status
+//
+// Layout rule: the bar is always ONE row, so the header never changes
+// height. Anything extra (search results, "no match", errors) floats.
 export default function ActorSwitcher({ actor, onChange }) {
     const [patients, setPatients] = useState([]);
     const [clinics, setClinics] = useState([]);
@@ -84,8 +87,8 @@ export default function ActorSwitcher({ actor, onChange }) {
                 if (!cancelled) {
                     setError(
                         isPatient
-                            ? "Could not load patients for the demo switcher."
-                            : "Could not load clinics for the demo switcher."
+                            ? "Couldn't load patients."
+                            : "Couldn't load clinics."
                     );
                 }
             } finally {
@@ -138,6 +141,22 @@ export default function ActorSwitcher({ actor, onChange }) {
         });
     };
 
+    const patientPlaceholder = loading
+        ? "Loading patients..."
+        : !error && patients.length === 0
+            ? "No patients exist yet"
+            : "Search patient by name...";
+
+    const clinicPlaceholder = loading
+        ? "Loading clinics..."
+        : !error && clinics.length === 0
+            ? "No clinics exist yet"
+            : "Select a clinic";
+
+    // The floating list shows whenever the user has typed something
+    const showResults =
+        isPatient && !actor.patientId && !loading && !error && !!trimmed;
+
     return (
         <div className="actor-bar">
             <label className="actor-field">
@@ -158,7 +177,10 @@ export default function ActorSwitcher({ actor, onChange }) {
             {/* ---------------- CLINIC STAFF: choose their clinic ---------------- */}
 
             {isStaff && (
-                <label className="actor-field">
+                <label
+                    className="actor-field"
+                    title="Pick the clinic you work at. You will only manage that clinic."
+                >
                     <span>Clinic</span>
                     <select
                         value={actor.clinicId}
@@ -166,9 +188,7 @@ export default function ActorSwitcher({ actor, onChange }) {
                         disabled={loading || (!!error && clinics.length === 0)}
                         aria-label="Demo clinic"
                     >
-                        <option value="">
-                            {loading ? "Loading clinics..." : "Select a clinic"}
-                        </option>
+                        <option value="">{clinicPlaceholder}</option>
 
                         {/* keep the saved clinic visible until the list loads */}
                         {actor.clinicId &&
@@ -195,11 +215,11 @@ export default function ActorSwitcher({ actor, onChange }) {
                 <div className="actor-field">
                     <span>Patient</span>
 
-                    {actor.patientId && (
+                    {actor.patientId ? (
                         <div className="actor-selected">
                             <strong>
                                 {actor.patientName || `ID ${actor.patientId}`}
-                            </strong>{" "}
+                            </strong>
                             <button
                                 type="button"
                                 className="actor-link"
@@ -208,38 +228,20 @@ export default function ActorSwitcher({ actor, onChange }) {
                                 Change
                             </button>
                         </div>
-                    )}
-
-                    {!actor.patientId && (
-                        <>
+                    ) : (
+                        <div className="actor-search">
                             <input
                                 type="text"
-                                placeholder={
-                                    loading
-                                        ? "Loading patients..."
-                                        : "Search patient by name..."
-                                }
+                                placeholder={patientPlaceholder}
                                 value={query}
                                 onChange={(e) => setQuery(e.target.value)}
-                                disabled={loading || (!!error && patients.length === 0)}
+                                disabled={loading || patients.length === 0}
                                 aria-label="Search patients by name"
+                                autoComplete="off"
                             />
 
-                            {trimmed && matches.length > 0 && (
-                                <ul
-                                    className="actor-results"
-                                    style={{
-                                        listStyle: "none",
-                                        margin: "4px 0 0",
-                                        padding: 0,
-                                        maxHeight: "220px",
-                                        overflowY: "auto",
-                                        border: "1px solid #cbd5e1",
-                                        borderRadius: "6px",
-                                        background: "#fff",
-                                        color: "#0f172a"
-                                    }}
-                                >
+                            {showResults && (
+                                <ul className="actor-results">
                                     {matches
                                         .slice(0, MAX_RESULTS_SHOWN)
                                         .map((p) => (
@@ -247,29 +249,33 @@ export default function ActorSwitcher({ actor, onChange }) {
                                                 <button
                                                     type="button"
                                                     onClick={() => choosePatient(p)}
-                                                    style={{
-                                                        display: "block",
-                                                        width: "100%",
-                                                        textAlign: "left",
-                                                        padding: "6px 10px",
-                                                        background: "transparent",
-                                                        color: "inherit",
-                                                        border: "none",
-                                                        cursor: "pointer"
-                                                    }}
                                                 >
                                                     {p.name}
                                                 </button>
                                             </li>
                                         ))}
+
+                                    {matches.length === 0 && (
+                                        <li className="actor-results-note">
+                                            No patients match "{query.trim()}"
+                                        </li>
+                                    )}
+
+                                    {matches.length > MAX_RESULTS_SHOWN && (
+                                        <li className="actor-results-note">
+                                            Showing {MAX_RESULTS_SHOWN} of{" "}
+                                            {matches.length} - keep typing to
+                                            narrow it down
+                                        </li>
+                                    )}
                                 </ul>
                             )}
-                        </>
+                        </div>
                     )}
                 </div>
             )}
 
-            {/* ---------------- notes / errors ---------------- */}
+            {/* ---------------- short notes (always one line) ---------------- */}
 
             {(isPatient || isStaff) && error && (
                 <span className="actor-note actor-note-error">
@@ -282,40 +288,6 @@ export default function ActorSwitcher({ actor, onChange }) {
                         Retry
                     </button>
                 </span>
-            )}
-
-            {isStaff && !loading && !error && clinics.length === 0 && (
-                <span className="actor-note">No clinics exist yet.</span>
-            )}
-
-            {isStaff && !actor.clinicId && !loading && clinics.length > 0 && (
-                <span className="actor-note">
-                    Pick the clinic you work at. You will only manage that clinic.
-                </span>
-            )}
-
-            {isPatient &&
-                !actor.patientId &&
-                !loading &&
-                !error &&
-                trimmed &&
-                matches.length === 0 && (
-                    <span className="actor-note">
-                        No patients match "{query.trim()}".
-                    </span>
-                )}
-
-            {isPatient &&
-                !actor.patientId &&
-                matches.length > MAX_RESULTS_SHOWN && (
-                    <span className="actor-note">
-                        Showing {MAX_RESULTS_SHOWN} of {matches.length} - type
-                        more to narrow it down.
-                    </span>
-                )}
-
-            {isPatient && !loading && !error && patients.length === 0 && (
-                <span className="actor-note">No patients exist yet.</span>
             )}
 
             {actor.role === "admin" && (
