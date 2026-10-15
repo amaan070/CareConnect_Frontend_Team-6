@@ -31,6 +31,238 @@ function YesNoBadge({ value }) {
     );
 }
 
+// =========================
+// ANALYTICS HELPERS
+// =========================
+
+const CHART_COLORS = [
+    "#0e7490",
+    "#d97706",
+    "#7c3aed",
+    "#16a34a",
+    "#db2777",
+    "#2563eb"
+];
+
+const formatMoney = (value) =>
+    `$${Number(value || 0).toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    })}`;
+
+// "2026-10-14T00:00:00.000Z" and "2026-10-14" both become "2026-10-14"
+const toDateKey = (value) => String(value).slice(0, 10);
+
+const formatDateKey = (key, options) =>
+    new Date(`${key}T00:00:00`).toLocaleDateString("en-US", options);
+
+// Uses the server's refresh time if the API sends one,
+// otherwise the time this browser received the data.
+const readRefreshedAt = (data) => {
+    const serverTime =
+        data?.last_refreshed ??
+        data?.refreshed_at ??
+        data?.lastRefreshed ??
+        null;
+
+    return serverTime
+        ? { time: serverTime, fromServer: true }
+        : { time: new Date().toISOString(), fromServer: false };
+};
+
+// Every clinic in the revenue data, sorted by name: [{ id, name }]
+const getRevenueClinics = (rows) => {
+    const byId = new Map();
+    rows.forEach((r) => {
+        if (!byId.has(String(r.clinic_id))) {
+            byId.set(String(r.clinic_id), {
+                id: String(r.clinic_id),
+                name: r.clinic_name ?? `Clinic ${r.clinic_id}`
+            });
+        }
+    });
+    return [...byId.values()].sort((a, b) =>
+        String(a.name).localeCompare(String(b.name))
+    );
+};
+
+// First 6 clinics use the fixed palette; the rest get evenly
+// spread hues so every clinic still has its own colour.
+const clinicColor = (index) =>
+    index < CHART_COLORS.length
+        ? CHART_COLORS[index]
+        : `hsl(${Math.round((index * 137.5) % 360)}, 55%, 42%)`;
+
+// Line chart of the 7-day moving average (window-function query)
+// for one selected clinic. Plain SVG, no chart library needed.
+function MovingAverageChart({ rows, selectedClinicId }) {
+    if (!rows || rows.length === 0) return null;
+
+    const dates = [...new Set(rows.map((r) => toDateKey(r.revenue_date)))].sort();
+
+    // Each clinic keeps a stable colour based on its place in the list
+    const allClinics = getRevenueClinics(rows).map((c, i) => ({
+        ...c,
+        color: clinicColor(i)
+    }));
+
+    const shownClinics = allClinics.filter(
+        (c) => c.id === String(selectedClinicId)
+    );
+
+    if (shownClinics.length === 0) return null;
+
+
+    const series = shownClinics.map(({ id, name, color }) => {
+        const clinicRows = rows.filter((r) => String(r.clinic_id) === id);
+        const byDate = new Map(
+            clinicRows.map((r) => [
+                toDateKey(r.revenue_date),
+                Number(r.moving_7_day_average)
+            ])
+        );
+        return {
+            id,
+            name,
+            color,
+            points: dates
+                .map((d, index) => ({ index, date: d, value: byDate.get(d) }))
+                .filter((p) => Number.isFinite(p.value))
+        };
+    });
+
+    // Single clinic: also draw its raw daily revenue (dashed) so the
+    // smoothing effect of the 7-day window is visible.
+    if (shownClinics.length === 1) {
+        const only = shownClinics[0];
+        const byDate = new Map(
+            rows
+                .filter((r) => String(r.clinic_id) === only.id)
+                .map((r) => [toDateKey(r.revenue_date), Number(r.daily_revenue)])
+        );
+        series.unshift({
+            id: `${only.id}-daily`,
+            name: `${only.name} — daily revenue`,
+            color: "#94a3b8",
+            dashed: true,
+            points: dates
+                .map((d, index) => ({ index, date: d, value: byDate.get(d) }))
+                .filter((p) => Number.isFinite(p.value))
+        });
+        series[1] = { ...series[1], name: `${only.name} — 7-day average` };
+    }
+
+    const width = 760;
+    const height = 280;
+    const pad = { top: 16, right: 20, bottom: 34, left: 70 };
+    const plotW = width - pad.left - pad.right;
+    const plotH = height - pad.top - pad.bottom;
+
+    const maxValue = Math.max(
+        1,
+        ...series.flatMap((s) => s.points.map((p) => p.value))
+    );
+    const yMax = Math.ceil((maxValue * 1.1) / 10) * 10;
+
+    const x = (index) =>
+        pad.left + (dates.length === 1 ? plotW / 2 : (index / (dates.length - 1)) * plotW);
+    const y = (value) => pad.top + plotH - (value / yMax) * plotH;
+
+    const yTicks = [0, 0.25, 0.5, 0.75, 1].map((t) => t * yMax);
+    const labelEvery = Math.max(1, Math.ceil(dates.length / 7));
+
+    return (
+        <div className="chart-card">
+            <svg
+                className="chart-svg"
+                viewBox={`0 0 ${width} ${height}`}
+                role="img"
+                aria-label="7-day moving average revenue per clinic"
+            >
+                {yTicks.map((tick) => (
+                    <g key={tick}>
+                        <line
+                            className="chart-grid"
+                            x1={pad.left}
+                            x2={width - pad.right}
+                            y1={y(tick)}
+                            y2={y(tick)}
+                        />
+                        <text
+                            className="chart-label"
+                            x={pad.left - 10}
+                            y={y(tick)}
+                            textAnchor="end"
+                            dominantBaseline="middle"
+                        >
+                            {formatMoney(tick).replace(/\.00$/, "")}
+                        </text>
+                    </g>
+                ))}
+
+                {dates.map((d, i) =>
+                    i % labelEvery === 0 || i === dates.length - 1 ? (
+                        <text
+                            key={d}
+                            className="chart-label"
+                            x={x(i)}
+                            y={height - 10}
+                            textAnchor="middle"
+                        >
+                            {formatDateKey(d, { month: "short", day: "numeric" })}
+                        </text>
+                    ) : null
+                )}
+
+                {series.map((s) => (
+                    <g key={s.id}>
+                        <polyline
+                            fill="none"
+                            stroke={s.color}
+                            strokeWidth={s.dashed ? 1.5 : 2.5}
+                            strokeDasharray={s.dashed ? "5 4" : undefined}
+                            strokeLinejoin="round"
+                            strokeLinecap="round"
+                            points={s.points
+                                .map((p) => `${x(p.index)},${y(p.value)}`)
+                                .join(" ")}
+                        />
+                        {s.points.map((p) => (
+                            <circle
+                                key={p.date}
+                                cx={x(p.index)}
+                                cy={y(p.value)}
+                                r={s.dashed ? 2.5 : 3.5}
+                                fill={s.color}
+                            >
+                                <title>
+                                    {`${s.name} · ${formatDateKey(p.date, {
+                                        month: "short",
+                                        day: "numeric",
+                                        year: "numeric"
+                                    })} · ${formatMoney(p.value)}`}
+                                </title>
+                            </circle>
+                        ))}
+                    </g>
+                ))}
+            </svg>
+
+            <ul className="chart-legend">
+                {series.map((s) => (
+                    <li key={s.id}>
+                        <span
+                            className="chart-swatch"
+                            style={{ background: s.color }}
+                        />
+                        {s.name}
+                    </li>
+                ))}
+            </ul>
+        </div>
+    );
+}
+
 function App() {
 
 const refreshDischargeAnalytics = async () => {
@@ -65,7 +297,14 @@ const refreshDischargeAnalytics = async () => {
 
         const data = await dataResponse.json();
 
-        setDischargeData(data.summary);
+        setDischargeData(data.summary || []);
+
+        // Prefer the time the refresh endpoint reports, then the data endpoint's
+        const refreshResult = await response.json().catch(() => ({}));
+        const fromRefresh = readRefreshedAt(refreshResult);
+        setDischargeRefreshedAt(
+            fromRefresh.fromServer ? fromRefresh : readRefreshedAt(data)
+        );
 
     } catch (error) {
         console.error("Discharge refresh error:", error);
@@ -173,6 +412,8 @@ const refreshDischargeAnalytics = async () => {
     const [dischargeData, setDischargeData] = useState([]);
     const [dischargeLoading, setDischargeLoading] = useState(false);
     const [dischargeError, setDischargeError] = useState("");
+    const [dischargeRefreshedAt, setDischargeRefreshedAt] = useState(null);
+    const [chartClinicId, setChartClinicId] = useState("");
     // =========================
     // FETCH PATIENTS
     // =========================
@@ -243,13 +484,14 @@ useEffect(() => {
         return;
     }
 
-    const fetchAnalytics = async () => {
+    let cancelled = false;
+
+    // Revenue (window functions) and discharges (materialized view)
+    // load independently, so one failing doesn't hide the other.
+    const fetchRevenue = async () => {
         try {
             setAnalyticsLoading(true);
-            setDischargeLoading(true);
-
             setAnalyticsError("");
-            setDischargeError("");
 
             const revenueResponse = await fetch(
                 "http://localhost:5000/api/analytics/clinic-revenue"
@@ -261,8 +503,23 @@ useEffect(() => {
 
             const revenueData = await revenueResponse.json();
 
-            setAnalyticsData(revenueData.analytics);
+            if (!cancelled) {
+                setAnalyticsData(revenueData.analytics || []);
+            }
+        } catch (error) {
+            console.error(error);
+            if (!cancelled) {
+                setAnalyticsError("Failed to load revenue analytics");
+            }
+        } finally {
+            if (!cancelled) setAnalyticsLoading(false);
+        }
+    };
 
+    const fetchDischarges = async () => {
+        try {
+            setDischargeLoading(true);
+            setDischargeError("");
 
             const dischargeResponse = await fetch(
                 "http://localhost:5000/api/analytics/discharges"
@@ -272,29 +529,28 @@ useEffect(() => {
                 throw new Error("Failed to fetch discharge analytics");
             }
 
-            const dischargeResult =
-                await dischargeResponse.json();
+            const dischargeResult = await dischargeResponse.json();
 
-            setDischargeData(dischargeResult.summary);
-
+            if (!cancelled) {
+                setDischargeData(dischargeResult.summary || []);
+                setDischargeRefreshedAt(readRefreshedAt(dischargeResult));
+            }
         } catch (error) {
             console.error(error);
-
-            setAnalyticsError(
-                "Failed to load revenue analytics"
-            );
-
-            setDischargeError(
-                "Failed to load discharge analytics"
-            );
-
+            if (!cancelled) {
+                setDischargeError("Failed to load discharge analytics");
+            }
         } finally {
-            setAnalyticsLoading(false);
-            setDischargeLoading(false);
+            if (!cancelled) setDischargeLoading(false);
         }
     };
 
-    fetchAnalytics();
+    fetchRevenue();
+    fetchDischarges();
+
+    return () => {
+        cancelled = true;
+    };
 
 }, [view]);
 
@@ -2563,12 +2819,15 @@ useEffect(() => {
 {view === "analytics" && (
     <div className="section">
         <h2>Clinic Revenue Analytics</h2>
+        <p>
+            Revenue trends from the window-function query, clinic
+            rankings from DENSE_RANK(), and discharge totals from the
+            materialized view.
+        </p>
 
-        {analyticsLoading && (
-            <div className="empty">
-                Loading analytics...
-            </div>
-        )}
+        {/* ================================================= */}
+        {/* 1. 7-DAY MOVING AVERAGE CHART (window function)   */}
+        {/* ================================================= */}
 
         {analyticsError && (
             <div className="error">
@@ -2576,206 +2835,11 @@ useEffect(() => {
             </div>
         )}
 
-        {!analyticsLoading &&
-            !analyticsError &&
-            analyticsData.length > 0 && (
-                <>
-                    {/* 7-Day Revenue Analytics */}
-<div className="analytics-header">
-    <div>
-        <h3>Monthly Discharge Summary</h3>
-        <p>
-            Clinic discharge statistics from the
-            materialized view.
-        </p>
-    </div>
-
-    <button
-        onClick={refreshDischargeAnalytics}
-        disabled={dischargeLoading}
-    >
-        {dischargeLoading
-            ? "Refreshing..."
-            : "Refresh Data"}
-    </button>
-</div>
-
-                    <div className="analytics-table-container">
-                        <table className="patient-table">
-                            <thead>
-                                <tr>
-                                    <th>Rank</th>
-                                    <th>Clinic</th>
-                                    <th>Date</th>
-                                    <th>Daily Revenue</th>
-                                    <th>7-Day Average</th>
-                                </tr>
-                            </thead>
-
-                            <tbody>
-                                {analyticsData
-                                    .filter((row) => {
-                                        const latestDate =
-                                            analyticsData.reduce(
-                                                (latest, item) =>
-                                                    item.revenue_date >
-                                                    latest
-                                                        ? item.revenue_date
-                                                        : latest,
-                                                analyticsData[0]
-                                                    .revenue_date
-                                            );
-
-                                        return (
-                                            row.revenue_date ===
-                                            latestDate
-                                        );
-                                    })
-                                    .map((row) => (
-                                        <tr key={row.clinic_id}>
-                                            <td>
-                                                <strong>
-                                                    #{row.clinic_rank}
-                                                </strong>
-                                            </td>
-
-                                            <td>
-                                                {row.clinic_name}
-                                            </td>
-
-                                            <td>
-                                                {new Date(
-                                                    row.revenue_date
-                                                ).toLocaleDateString()}
-                                            </td>
-
-                                            <td>
-                                                $
-                                                {Number(
-                                                    row.daily_revenue
-                                                ).toFixed(2)}
-                                            </td>
-
-                                            <td>
-                                                <strong>
-                                                    $
-                                                    {Number(
-                                                        row.moving_7_day_average
-                                                    ).toFixed(2)}
-                                                </strong>
-                                            </td>
-                                        </tr>
-                                    ))}
-                            </tbody>
-                        </table>
-                    </div>
-
-                    {/* Monthly Discharge Summary */}
-                    <div className="analytics-summary">
-                        <div className="analytics-header">
-                            <div>
-                                <h3>Monthly Discharge Summary</h3>
-                                <p>
-                                    Clinic discharge statistics from the
-                                    materialized view.
-                                </p>
-                            </div>
-                        </div>
-
-                        {dischargeLoading && (
-                            <div className="empty">
-                                Loading discharge summary...
-                            </div>
-                        )}
-
-                        {dischargeError && (
-                            <div className="error">
-                                {dischargeError}
-                            </div>
-                        )}
-
-                        {!dischargeLoading &&
-                            !dischargeError &&
-                            dischargeData.length > 0 && (
-                                <div className="analytics-table-container">
-                                    <table className="patient-table">
-                                        <thead>
-                                            <tr>
-                                                <th>Clinic</th>
-                                                <th>Month</th>
-                                                <th>Total Discharges</th>
-                                            </tr>
-                                        </thead>
-
-                                        <tbody>
-                                            {(() => {
-                                                const latestMonth =
-                                                    dischargeData.reduce(
-                                                        (latest, item) =>
-                                                            item.discharge_month >
-                                                            latest
-                                                                ? item.discharge_month
-                                                                : latest,
-                                                        dischargeData[0]
-                                                            .discharge_month
-                                                    );
-
-                                                return dischargeData
-                                                    .filter(
-                                                        (item) =>
-                                                            item.discharge_month ===
-                                                            latestMonth
-                                                    )
-                                                    .sort(
-                                                        (a, b) =>
-                                                            Number(
-                                                                b.total_discharges
-                                                            ) -
-                                                            Number(
-                                                                a.total_discharges
-                                                            )
-                                                    )
-                                                    .map((item) => (
-                                                        <tr
-                                                            key={
-                                                                item.clinic_id
-                                                            }
-                                                        >
-                                                            <td>
-                                                                {
-                                                                    item.clinic_name
-                                                                }
-                                                            </td>
-
-                                                            <td>
-                                                                {new Date(
-                                                                    item.discharge_month
-                                                                ).toLocaleDateString(
-                                                                    "en-US",
-                                                                    {
-                                                                        month: "long",
-                                                                        year: "numeric"
-                                                                    }
-                                                                )}
-                                                            </td>
-
-                                                            <td>
-                                                                <strong>
-                                                                    {
-                                                                        item.total_discharges
-                                                                    }
-                                                                </strong>
-                                                            </td>
-                                                        </tr>
-                                                    ));
-                                            })()}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            )}
-                    </div>
-                </>
-            )}
+        {analyticsLoading && (
+            <div className="empty">
+                Loading analytics...
+            </div>
+        )}
 
         {!analyticsLoading &&
             !analyticsError &&
@@ -2784,9 +2848,330 @@ useEffect(() => {
                     No analytics data available.
                 </div>
             )}
+
+        {!analyticsLoading &&
+            !analyticsError &&
+            analyticsData.length > 0 && (() => {
+                const latestDate = analyticsData.reduce(
+                    (latest, item) =>
+                        toDateKey(item.revenue_date) > latest
+                            ? toDateKey(item.revenue_date)
+                            : latest,
+                    toDateKey(analyticsData[0].revenue_date)
+                );
+
+                const rankedRows = analyticsData
+                    .filter(
+                        (row) =>
+                            toDateKey(row.revenue_date) === latestDate
+                    )
+                    .sort(
+                        (a, b) =>
+                            Number(a.clinic_rank) -
+                                Number(b.clinic_rank) ||
+                            String(a.clinic_name).localeCompare(
+                                String(b.clinic_name)
+                            )
+                    );
+
+                // Every clinic for the chart selector. Until one is
+                // picked (or if it disappears after a reload), show
+                // the #1-ranked clinic for the latest day.
+                const chartClinics = getRevenueClinics(analyticsData);
+                const chartClinic = chartClinics.some(
+                    (c) => c.id === chartClinicId
+                )
+                    ? chartClinicId
+                    : String(rankedRows[0]?.clinic_id ?? chartClinics[0]?.id ?? "");
+
+                return (
+                    <>
+                        <div className="analytics-header">
+                            <div>
+                                <h3>7-Day Moving Average Revenue</h3>
+                                <p>
+                                    Average daily revenue over a rolling
+                                    7-day window, per clinic. Choose a
+                                    clinic to view its trend; the dashed
+                                    line is its raw daily revenue. Hover
+                                    a point for its value.
+                                </p>
+                            </div>
+
+                            <label className="chart-filter">
+                                Clinic
+                                <select
+                                    value={chartClinic}
+                                    onChange={(e) =>
+                                        setChartClinicId(e.target.value)
+                                    }
+                                >
+                                    {chartClinics.map((clinic) => (
+                                        <option
+                                            key={clinic.id}
+                                            value={clinic.id}
+                                        >
+                                            {clinic.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+                        </div>
+
+                        <MovingAverageChart
+                            rows={analyticsData}
+                            selectedClinicId={chartClinic}
+                        />
+
+                        {/* ================================================= */}
+                        {/* 2. RANKED TABLE (DENSE_RANK)                      */}
+                        {/* ================================================= */}
+
+                        <div className="analytics-header">
+                            <div>
+                                <h3>Clinic Revenue Ranking</h3>
+                                <p>
+                                    Ranked with DENSE_RANK() for{" "}
+                                    <strong>
+                                        {formatDateKey(latestDate, {
+                                            month: "long",
+                                            day: "numeric",
+                                            year: "numeric"
+                                        })}
+                                    </strong>
+                                    . Clinics with equal revenue share a
+                                    rank, and the next rank is not skipped.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="analytics-table-container">
+                            <table className="patient-table">
+                                <thead>
+                                    <tr>
+                                        <th>Rank</th>
+                                        <th>Clinic</th>
+                                        <th>Date</th>
+                                        <th>Daily Revenue</th>
+                                        <th>7-Day Average</th>
+                                    </tr>
+                                </thead>
+
+                                <tbody>
+                                    {rankedRows.map((row) => (
+                                        <tr key={row.clinic_id}>
+                                            <td>
+                                                <span className="rank-badge">
+                                                    #{row.clinic_rank}
+                                                </span>
+                                            </td>
+
+                                            <td>
+                                                {row.clinic_name}
+                                            </td>
+
+                                            <td>
+                                                {formatDateKey(
+                                                    toDateKey(row.revenue_date),
+                                                    {
+                                                        month: "short",
+                                                        day: "numeric",
+                                                        year: "numeric"
+                                                    }
+                                                )}
+                                            </td>
+
+                                            <td>
+                                                {formatMoney(row.daily_revenue)}
+                                            </td>
+
+                                            <td>
+                                                <strong>
+                                                    {formatMoney(
+                                                        row.moving_7_day_average
+                                                    )}
+                                                </strong>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </>
+                );
+            })()}
+
+        {/* ================================================= */}
+        {/* 3. MATERIALIZED VIEW SUMMARY + REFRESH            */}
+        {/* ================================================= */}
+
+        <div className="analytics-summary">
+            <div className="analytics-header">
+                <div>
+                    <h3>Monthly Discharge Summary</h3>
+                    <p>
+                        Clinic discharge statistics from the
+                        materialized view.
+                    </p>
+                    <p className="muted">
+                        Last refreshed:{" "}
+                        <strong>
+                            {dischargeRefreshedAt
+                                ? new Date(
+                                    dischargeRefreshedAt.time
+                                ).toLocaleString()
+                                : "—"}
+                        </strong>
+                        {dischargeRefreshedAt &&
+                            !dischargeRefreshedAt.fromServer &&
+                            " (time loaded in this browser)"}
+                    </p>
+                </div>
+
+                <button
+                    onClick={refreshDischargeAnalytics}
+                    disabled={dischargeLoading}
+                >
+                    {dischargeLoading
+                        ? "Refreshing..."
+                        : "Refresh Data"}
+                </button>
+            </div>
+
+            {dischargeError && (
+                <div className="error">
+                    {dischargeError}
+                </div>
+            )}
+
+            {dischargeLoading && dischargeData.length === 0 && (
+                <div className="empty">
+                    Loading discharge summary...
+                </div>
+            )}
+
+            {!dischargeLoading &&
+                !dischargeError &&
+                dischargeData.length === 0 && (
+                    <div className="empty">
+                        No discharge data in the materialized view.
+                    </div>
+                )}
+
+            {dischargeData.length > 0 && (() => {
+                const latestMonth = dischargeData.reduce(
+                    (latest, item) =>
+                        item.discharge_month > latest
+                            ? item.discharge_month
+                            : latest,
+                    dischargeData[0].discharge_month
+                );
+
+                const monthRows = dischargeData
+                    .filter(
+                        (item) => item.discharge_month === latestMonth
+                    )
+                    .sort(
+                        (a, b) =>
+                            Number(b.total_discharges) -
+                            Number(a.total_discharges)
+                    );
+
+                const totalDischarges = monthRows.reduce(
+                    (sum, item) => sum + Number(item.total_discharges || 0),
+                    0
+                );
+
+                const allTimeDischarges = dischargeData.reduce(
+                    (sum, item) => sum + Number(item.total_discharges || 0),
+                    0
+                );
+
+                const topClinic = monthRows[0];
+
+                const monthLabel = new Date(
+                    latestMonth
+                ).toLocaleDateString("en-US", {
+                    month: "long",
+                    year: "numeric"
+                });
+
+                return (
+                    <>
+                        <div className="stat-grid">
+                            <div className="stat-tile">
+                                <span className="stat-label">
+                                    Discharges in {monthLabel}
+                                </span>
+                                <span className="stat-value">
+                                    {totalDischarges.toLocaleString()}
+                                </span>
+                            </div>
+
+                            <div className="stat-tile">
+                                <span className="stat-label">
+                                    Clinics with discharges
+                                </span>
+                                <span className="stat-value">
+                                    {monthRows.length}
+                                </span>
+                            </div>
+
+                            <div className="stat-tile">
+                                <span className="stat-label">
+                                    Top clinic this month
+                                </span>
+                                <span className="stat-value stat-value-text">
+                                    {topClinic?.clinic_name ?? "—"}
+                                </span>
+                                {topClinic && (
+                                    <span className="muted">
+                                        {topClinic.total_discharges} discharges
+                                    </span>
+                                )}
+                            </div>
+
+                            <div className="stat-tile">
+                                <span className="stat-label">
+                                    All discharges in view
+                                </span>
+                                <span className="stat-value">
+                                    {allTimeDischarges.toLocaleString()}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div className="analytics-table-container">
+                            <table className="patient-table">
+                                <thead>
+                                    <tr>
+                                        <th>Clinic</th>
+                                        <th>Month</th>
+                                        <th>Total Discharges</th>
+                                    </tr>
+                                </thead>
+
+                                <tbody>
+                                    {monthRows.map((item) => (
+                                        <tr key={item.clinic_id}>
+                                            <td>{item.clinic_name}</td>
+                                            <td>{monthLabel}</td>
+                                            <td>
+                                                <strong>
+                                                    {item.total_discharges}
+                                                </strong>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </>
+                );
+            })()}
+        </div>
     </div>
 )}
-
 
 {view === "reviews" && (
     <div className="section">

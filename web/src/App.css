@@ -550,6 +550,138 @@ button:focus-visible {
     color: var(--ink);
 }
 
+/* clinic selector next to the chart heading */
+.chart-filter {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: none;
+    font-weight: 600;
+}
+
+.chart-filter select {
+    min-width: 220px;
+    max-width: 100%;
+    font-weight: 400;
+}
+
+@media (max-width: 700px) {
+    .chart-filter,
+    .chart-filter select {
+        width: 100%;
+    }
+}
+
+/* space between the chart and the ranking table header */
+.chart-card + .analytics-header {
+    margin-top: 30px;
+}
+
+/* 7-day moving average chart */
+.chart-card {
+    margin-bottom: 8px;
+    padding: 16px 16px 12px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+}
+
+.chart-svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+}
+
+.chart-grid {
+    stroke: var(--line);
+    stroke-width: 1;
+}
+
+.chart-label {
+    fill: var(--ink-faint);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+}
+
+.chart-svg circle {
+    cursor: pointer;
+}
+
+.chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    margin: 10px 0 0;
+    padding: 0;
+    list-style: none;
+    color: var(--ink-muted);
+    font-size: 13px;
+}
+
+.chart-legend li {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.chart-swatch {
+    width: 14px;
+    height: 3px;
+    border-radius: 2px;
+}
+
+/* DENSE_RANK position */
+.rank-badge {
+    display: inline-block;
+    min-width: 34px;
+    padding: 2px 8px;
+    background: var(--info-soft);
+    color: var(--info-ink);
+    border-radius: 999px;
+    font-size: 12.5px;
+    font-weight: 700;
+    text-align: center;
+}
+
+/* materialized view summary numbers */
+.stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 12px;
+    margin: 6px 0 18px;
+}
+
+.stat-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 14px 16px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+}
+
+.stat-label {
+    color: var(--ink-muted);
+    font-size: 12.5px;
+    font-weight: 500;
+}
+
+.stat-value {
+    color: var(--ink);
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+}
+
+.stat-value-text {
+    font-size: 16px;
+    letter-spacing: 0;
+    line-height: 1.3;
+}
+
 
 /* =========================
    FEEDBACK: pagination, empty, loading, error, warning
